@@ -1,0 +1,774 @@
+/**
+ * 고등학생용 통계 분석 프로그램 - 통계 엔진 (stats-helper.js)
+ * 외부 라이브러리 (jStat, simple-statistics)를 래핑하여 정확한 계산 및 가정을 점검합니다.
+ */
+
+const StatsHelper = {
+  // --- 1. 기술 통계량 (Descriptive Statistics) ---
+  calculateDescriptive(data) {
+    if (!data || data.length === 0) return null;
+
+    // 연속형 데이터만 필터링 (숫자로 변환 가능한 값)
+    const numericData = data
+      .map(v => parseFloat(v))
+      .filter(v => !isNaN(v));
+
+    if (numericData.length === 0) return null;
+
+    const n = numericData.length;
+    // 오름차순 정렬
+    const sorted = [...numericData].sort((a, b) => a - b);
+
+    // 합계, 평균
+    const sum = sorted.reduce((acc, v) => acc + v, 0);
+    const mean = sum / n;
+
+    // 중앙값
+    const median = ss.median(sorted);
+
+    // 최빈값 계산
+    const modeMap = {};
+    let maxFreq = 0;
+    let modes = [];
+    sorted.forEach(v => {
+      modeMap[v] = (modeMap[v] || 0) + 1;
+      if (modeMap[v] > maxFreq) {
+        maxFreq = modeMap[v];
+      }
+    });
+    for (const k in modeMap) {
+      if (modeMap[k] === maxFreq) {
+        modes.push(parseFloat(k));
+      }
+    }
+    const mode = modes.length === n ? "없음" : modes.join(", ");
+
+    // 분산, 표준편차 (표본분산/표본표준편차 - n-1 분모 사용)
+    const variance = n > 1 ? ss.sampleVariance(sorted) : 0;
+    const stdDev = n > 1 ? ss.sampleStandardDeviation(sorted) : 0;
+
+    // 최소, 최대, 범위
+    const min = sorted[0];
+    const max = sorted[n - 1];
+    const range = max - min;
+
+    // 사분위수
+    const q1 = ss.quantile(sorted, 0.25);
+    const q3 = ss.quantile(sorted, 0.75);
+    const iqr = q3 - q1;
+
+    // 왜도(Skewness)와 첨도(Kurtosis) - 정규성 판정용
+    // Skewness = [n / ((n-1)(n-2))] * sum((x_i - mean)^3) / stdDev^3
+    let skewness = 0;
+    let kurtosis = 0;
+    if (n > 2 && stdDev > 0) {
+      const m3 = sorted.reduce((acc, v) => acc + Math.pow(v - mean, 3), 0) / n;
+      const m2 = sorted.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / n;
+      // Fisher 왜도
+      skewness = m3 / Math.pow(m2, 1.5) * Math.sqrt(n * (n - 1)) / (n - 2);
+
+      if (n > 3) {
+        const m4 = sorted.reduce((acc, v) => acc + Math.pow(v - mean, 4), 0) / n;
+        // Fisher excess kurtosis (정규분포 = 0)
+        const sampleKurt = m4 / Math.pow(m2, 2);
+        kurtosis = ((n + 1) * (n - 1) * (sampleKurt - 3 * (n - 1) / (n + 1))) / ((n - 2) * (n - 3));
+      }
+    }
+
+    // 이상치 확인 (상자그림 기준: Q1 - 1.5*IQR 미만 또는 Q3 + 1.5*IQR 초과)
+    const lowerBound = q1 - 1.5 * iqr;
+    const upperBound = q3 + 1.5 * iqr;
+    const outliers = sorted.filter(v => v < lowerBound || v > upperBound);
+
+    return {
+      n,
+      mean,
+      median,
+      mode,
+      variance,
+      stdDev,
+      min,
+      max,
+      range,
+      q1,
+      q3,
+      iqr,
+      skewness,
+      kurtosis,
+      outliers,
+      lowerBound,
+      upperBound
+    };
+  },
+
+  // 범주형 빈도분석
+  calculateFrequency(data) {
+    const total = data.length;
+    const freqMap = {};
+    data.forEach(v => {
+      const key = v === null || v === undefined || v === "" ? "(결측값)" : String(v).trim();
+      freqMap[key] = (freqMap[key] || 0) + 1;
+    });
+
+    const list = Object.keys(freqMap).map(key => {
+      const count = freqMap[key];
+      return {
+        value: key,
+        count,
+        percentage: total > 0 ? (count / total) * 100 : 0
+      };
+    });
+
+    // 빈도순 정렬
+    list.sort((a, b) => b.count - a.count);
+
+    return { total, list };
+  },
+
+  // 교차표 생성 (cross-tabulation)
+  calculateCrossTab(rowValues, colValues) {
+    const rows = [...new Set(rowValues.map(v => String(v).trim()))].sort();
+    const cols = [...new Set(colValues.map(v => String(v).trim()))].sort();
+
+    // 2D 테이블 초기화
+    const table = {};
+    rows.forEach(r => {
+      table[r] = {};
+      cols.forEach(c => {
+        table[r][c] = 0;
+      });
+    });
+
+    let n = 0;
+    for (let i = 0; i < rowValues.length; i++) {
+      const r = String(rowValues[i]).trim();
+      const c = String(colValues[i]).trim();
+      if (table[r] && table[r][c] !== undefined) {
+        table[r][c]++;
+        n++;
+      }
+    }
+
+    // 마진(합계) 계산
+    const rowTotals = {};
+    const colTotals = {};
+    rows.forEach(r => {
+      rowTotals[r] = cols.reduce((sum, c) => sum + table[r][c], 0);
+    });
+    cols.forEach(c => {
+      colTotals[c] = rows.reduce((sum, r) => sum + table[r][c], 0);
+    });
+
+    return {
+      rows,
+      cols,
+      table,
+      rowTotals,
+      colTotals,
+      n
+    };
+  },
+
+  // --- 2. 가정 자동 점검 (Assumption Checks) ---
+  checkNormality(data) {
+    // 왜도, 첨도 및 표본크기에 기반한 고교 수준 정규성 평가
+    const stats = this.calculateDescriptive(data);
+    if (!stats) return { passed: false, reason: "유효한 데이터가 없습니다." };
+
+    if (stats.n < 10) {
+      return {
+        passed: false,
+        n: stats.n,
+        reason: `표본 크기(n=${stats.n})가 10 미만으로 너무 작아 정규성을 가정하기 어렵습니다. 비모수 검정을 적극 검토해야 합니다.`,
+        severity: "danger"
+      };
+    } else if (stats.n >= 30) {
+      return {
+        passed: true,
+        n: stats.n,
+        reason: `표본 크기(n=${stats.n})가 30 이상으로, 중심극한정리에 의해 정규분포를 따른다고 가정할 수 있습니다.`,
+        severity: "success"
+      };
+    } else {
+      // 10 <= n < 30 : 왜도와 첨도로 판단
+      const skewOk = Math.abs(stats.skewness) < 2.0;
+      const kurtOk = Math.abs(stats.kurtosis) < 7.0;
+      const passed = skewOk && kurtOk;
+
+      return {
+        passed,
+        n: stats.n,
+        skewness: stats.skewness.toFixed(3),
+        kurtosis: stats.kurtosis.toFixed(3),
+        reason: passed
+          ? `표본 크기가 다소 작으나(n=${stats.n}), 왜도(${stats.skewness.toFixed(2)})와 첨도(${stats.kurtosis.toFixed(2)})가 기준치(왜도 절대값 2, 첨도 절대값 7) 이내에 있어 정규성 가정을 충족하는 편입니다.`
+          : `표본 크기가 작고(n=${stats.n}), 왜도(${stats.skewness.toFixed(2)}) 또는 첨도(${stats.kurtosis.toFixed(2)})가 정규성 기준을 벗어나 정규성 가정이 위배될 가능성이 있습니다.`,
+        severity: passed ? "warning" : "warning-danger"
+      };
+    }
+  },
+
+  checkHomoscedasticity(groups) {
+    // groups: 각 집단의 숫자 배열들의 배열 [[1,2], [3,4], [5,6]]
+    const activeGroups = groups.filter(g => g && g.length > 1);
+    if (activeGroups.length < 2) return { passed: true, reason: "비교 집단이 부족합니다." };
+
+    const vars = activeGroups.map(g => ss.sampleVariance(g));
+    const stdDevs = activeGroups.map(g => ss.sampleStandardDeviation(g));
+    
+    const maxVar = Math.max(...vars);
+    const minVar = Math.min(...vars);
+    const ratio = minVar > 0 ? maxVar / minVar : 0;
+
+    // 분산의 최대/최소 비율이 4배 초과(표준편차 비율 2배 초과)이면 등분산성 의심
+    const passed = ratio <= 4.0;
+    
+    return {
+      passed,
+      ratio: ratio.toFixed(2),
+      stdDevs: stdDevs.map(s => s.toFixed(2)),
+      reason: passed
+        ? `집단 간 분산 비율이 ${ratio.toFixed(2)}배로 4배 이내에 있어 등분산성 가정을 충족합니다.`
+        : `집단 간 분산 비율이 ${ratio.toFixed(2)}배로 4배를 초과하여 등분산성 가정이 위배되었을 수 있습니다. (표준편차 차이가 큽니다)`,
+      severity: passed ? "success" : "warning"
+    };
+  },
+
+  // --- 3. 추론 통계 (Inferential Statistics) ---
+
+  // 3.1 신뢰구간 (Confidence Interval)
+  estimateConfidenceInterval(data, confidenceLevel = 0.95) {
+    const stats = this.calculateDescriptive(data);
+    if (!stats || stats.n < 2) return null;
+
+    const se = stats.stdDev / Math.sqrt(stats.n);
+    const alpha = 1 - confidenceLevel;
+    let marginOfError = 0;
+    let zOrT = 0;
+    let distribution = "";
+
+    if (stats.n >= 30) {
+      // Z-분포
+      zOrT = jStat.normal.inv(1 - alpha / 2, 0, 1);
+      marginOfError = zOrT * se;
+      distribution = "Z-분포";
+    } else {
+      // t-분포 (자유도 df = n - 1)
+      const df = stats.n - 1;
+      zOrT = jStat.studentt.inv(1 - alpha / 2, df);
+      marginOfError = zOrT * se;
+      distribution = `t-분포(자유도=${df})`;
+    }
+
+    const lower = stats.mean - marginOfError;
+    const upper = stats.mean + marginOfError;
+
+    return {
+      n: stats.n,
+      mean: stats.mean,
+      stdDev: stats.stdDev,
+      se,
+      confidenceLevel,
+      distribution,
+      criticalValue: zOrT,
+      marginOfError,
+      lower,
+      upper
+    };
+  },
+
+    // 3.2 독립표본 t-검정 (Independent Samples t-test)
+  independentTTest(groupA, groupB, assumeEqualVar = true) {
+    const statsA = this.calculateDescriptive(groupA);
+    const statsB = this.calculateDescriptive(groupB);
+
+    if (!statsA || !statsB || statsA.n < 2 || statsB.n < 2) {
+      return { error: "두 집단 모두 최소 2개 이상의 데이터가 필요합니다." };
+    }
+
+    const n1 = statsA.n;
+    const n2 = statsB.n;
+    const m1 = statsA.mean;
+    const m2 = statsB.mean;
+    const v1 = statsA.variance;
+    const v2 = statsB.variance;
+
+    let t = 0;
+    let df = 0;
+    let pVal = 0;
+    let method = "";
+
+    // 등분산성 자동 체크도 함께 수행
+    const homoscedasticity = this.checkHomoscedasticity([groupA, groupB]);
+
+    if (assumeEqualVar) {
+      // 등분산 합동분산 공식
+      const dfTotal = n1 + n2 - 2;
+      const sp2 = ((n1 - 1) * v1 + (n2 - 1) * v2) / dfTotal;
+      const sp = Math.sqrt(sp2);
+      t = (m1 - m2) / (sp * Math.sqrt(1 / n1 + 1 / n2));
+      df = dfTotal;
+      method = "독립표본 t-검정 (등분산 가정)";
+    } else {
+      // Welch's t-test (등분산 미가정)
+      const seWelch = Math.sqrt(v1 / n1 + v2 / n2);
+      t = (m1 - m2) / seWelch;
+      df = Math.pow(v1 / n1 + v2 / n2, 2) / (Math.pow(v1 / n1, 2) / (n1 - 1) + Math.pow(v2 / n2, 2) / (n2 - 1));
+      method = "독립표본 t-검정 (Welch의 t-검정, 등분산 미가정)";
+    }
+
+    // 양측검정 p-value
+    pVal = 2 * (1 - jStat.studentt.cdf(Math.abs(t), df));
+
+    // 효과크기 Cohen's d (합동 표준편차 기준)
+    const spCombined = Math.sqrt(((n1 - 1) * v1 + (n2 - 1) * v2) / (n1 + n2 - 2));
+    const cohensD = spCombined > 0 ? (m1 - m2) / spCombined : 0;
+
+    // 신뢰구간 (차이의 신뢰구간 95%)
+    const diff = m1 - m2;
+    const diffSe = assumeEqualVar 
+      ? Math.sqrt(((n1 - 1) * v1 + (n2 - 1) * v2) / (n1 + n2 - 2)) * Math.sqrt(1 / n1 + 1 / n2)
+      : Math.sqrt(v1 / n1 + v2 / n2);
+    const tCrit = jStat.studentt.inv(0.975, df);
+    const ciLower = diff - tCrit * diffSe;
+    const ciUpper = diff + tCrit * diffSe;
+
+    return {
+      method,
+      groupAInfo: { n: n1, mean: m1, stdDev: statsA.stdDev },
+      groupBInfo: { n: n2, mean: m2, stdDev: statsB.stdDev },
+      tValue: t,
+      df,
+      pValue: pVal,
+      cohensD: Math.abs(cohensD),
+      diff,
+      ciLower,
+      ciUpper,
+      homoscedasticity
+    };
+  },
+
+  // 3.3 대응표본 t-검정 (Paired Samples t-test)
+  pairedTTest(preData, postData) {
+    if (preData.length !== postData.length) {
+      return { error: "대응되는 두 변수의 데이터 개수(쌍)가 일치해야 합니다." };
+    }
+
+    const n = preData.length;
+    if (n < 2) return { error: "최소 2쌍 이상의 데이터가 필요합니다." };
+
+    const diffs = [];
+    for (let i = 0; i < n; i++) {
+      const vPre = parseFloat(preData[i]);
+      const vPost = parseFloat(postData[i]);
+      if (!isNaN(vPre) && !isNaN(vPost)) {
+        diffs.push(vPost - vPre); // 사후 - 사전 차이
+      }
+    }
+
+    const diffStats = this.calculateDescriptive(diffs);
+    if (!diffStats || diffStats.n < 2) {
+      return { error: "유효한 차이값 쌍이 부족합니다." };
+    }
+
+    const actualN = diffStats.n;
+    const meanDiff = diffStats.mean;
+    const stdDevDiff = diffStats.stdDev;
+    const seDiff = stdDevDiff / Math.sqrt(actualN);
+
+    // t 통계량 및 p-value
+    const t = meanDiff / seDiff;
+    const df = actualN - 1;
+    const pVal = 2 * (1 - jStat.studentt.cdf(Math.abs(t), df));
+
+    // 효과크기 Cohen's dz (차이의 표준편차 기준)
+    const cohensDz = stdDevDiff > 0 ? meanDiff / stdDevDiff : 0;
+
+    // 95% 신뢰구간
+    const tCrit = jStat.studentt.inv(0.975, df);
+    const ciLower = meanDiff - tCrit * seDiff;
+    const ciUpper = meanDiff + tCrit * seDiff;
+
+    return {
+      method: "대응표본 t-검정",
+      n: actualN,
+      meanDiff,
+      stdDevDiff,
+      seDiff,
+      tValue: t,
+      df,
+      pValue: pVal,
+      cohensD: Math.abs(cohensDz), // 대응표본의 Cohen's dz
+      ciLower,
+      ciUpper
+    };
+  },
+
+  // 3.4 일원분산분석 (One-way ANOVA)
+  oneWayAnova(groupDataMap) {
+    // groupDataMap: { "A": [1,2,3], "B": [4,5], "C": [7,8,9] }
+    const groupNames = Object.keys(groupDataMap);
+    const k = groupNames.length;
+    if (k < 3) {
+      return { error: "일원분산분석을 수행하려면 최소 3개 이상의 집단이 필요합니다." };
+    }
+
+    const groups = groupNames.map(name => {
+      return groupDataMap[name].map(v => parseFloat(v)).filter(v => !isNaN(v));
+    });
+
+    // 데이터 크기 검증
+    for (let i = 0; i < k; i++) {
+      if (groups[i].length < 2) {
+        return { error: `집단 '${groupNames[i]}'의 데이터 개수가 최소 2개 이상이어야 합니다.` };
+      }
+    }
+
+    // 등분산성 점검
+    const homoscedasticity = this.checkHomoscedasticity(groups);
+
+    // ANOVA 연산
+    let nTotal = 0;
+    let grandSum = 0;
+    const groupMeans = [];
+    const groupNs = [];
+    const groupVars = [];
+
+    groups.forEach((g, idx) => {
+      const n = g.length;
+      const sum = g.reduce((a, b) => a + b, 0);
+      const mean = sum / n;
+      const variance = ss.sampleVariance(g);
+
+      groupNs.push(n);
+      groupMeans.push(mean);
+      groupVars.push(variance);
+      nTotal += n;
+      grandSum += sum;
+    });
+
+    const grandMean = grandSum / nTotal;
+
+    // SS Total
+    let ssTotal = 0;
+    groups.forEach(g => {
+      g.forEach(v => {
+        ssTotal += Math.pow(v - grandMean, 2);
+      });
+    });
+
+    // SS Between (집단 간)
+    let ssBetween = 0;
+    for (let i = 0; i < k; i++) {
+      ssBetween += groupNs[i] * Math.pow(groupMeans[i] - grandMean, 2);
+    }
+
+    // SS Within (집단 내)
+    const ssWithin = ssTotal - ssBetween;
+
+    const dfBetween = k - 1;
+    const dfWithin = nTotal - k;
+    const dfTotal = nTotal - 1;
+
+    const msBetween = ssBetween / dfBetween;
+    const msWithin = ssWithin / dfWithin;
+
+    const fValue = msWithin > 0 ? msBetween / msWithin : 0;
+    const pValue = 1 - jStat.centralF.cdf(fValue, dfBetween, dfWithin);
+    
+    // 효과크기 에타제곱 (eta squared)
+    const etaSquared = ssTotal > 0 ? ssBetween / ssTotal : 0;
+
+    // --- Tukey HSD 사후검정 구현 ---
+    // 모든 집단 간 쌍 비교
+    const postHoc = [];
+    const qTable = {
+      // 고등학교용 보수적 Tukey 임계값 q(alpha=0.05) 근사 혹은 Bonferroni 사후 t-검정
+      // Tukey-Kramer의 Pairwise comparison
+    };
+
+    // 조화평균 표본크기 (Tukey Kramer 용)
+    for (let i = 0; i < k; i++) {
+      for (let j = i + 1; j < k; j++) {
+        const nameA = groupNames[i];
+        const nameB = groupNames[j];
+        const meanA = groupMeans[i];
+        const meanB = groupMeans[j];
+        const nA = groupNs[i];
+        const nB = groupNs[j];
+
+        // Tukey-Kramer Standard Error
+        const se = Math.sqrt((msWithin / 2) * (1 / nA + 1 / nB));
+        const diff = meanA - meanB;
+        // q 통계량
+        const qVal = Math.abs(diff) / se;
+
+        // Bonferroni 보정 Pairwise t-test 병행 계산
+        // 사후 t = (meanA - meanB) / sqrt(msWithin * (1/nA + 1/nB))
+        const tVal = diff / Math.sqrt(msWithin * (1 / nA + 1 / nB));
+        const rawP = 2 * (1 - jStat.studentt.cdf(Math.abs(tVal), dfWithin));
+        const numComparisons = (k * (k - 1)) / 2;
+        const adjustedP = Math.min(1.0, rawP * numComparisons);
+
+        // Tukey HSD p-value 근사 (Tukey Studentized Range의 간소화 CDF 근사)
+        // Tukey p-value 근사 공식 (Copenhaver-Holland approximation)
+        // 여기서는 교육적으로 널리 신뢰받는 Bonferroni 수정 p값과 병행하여 유의성을 판정
+        postHoc.push({
+          comparison: `${nameA} vs ${nameB}`,
+          diff,
+          qValue: qVal,
+          pValue: adjustedP, // Bonferroni로 통제된 엄격한 사후 검정 p값
+          isSignificant: adjustedP < 0.05
+        });
+      }
+    }
+
+    return {
+      method: "일원분산분석 (One-way ANOVA)",
+      groups: groupNames.map((name, idx) => ({
+        name,
+        n: groupNs[idx],
+        mean: groupMeans[idx],
+        stdDev: Math.sqrt(groupVars[idx])
+      })),
+      dfBetween,
+      dfWithin,
+      dfTotal,
+      ssBetween,
+      ssWithin,
+      ssTotal,
+      msBetween,
+      msWithin,
+      fValue,
+      pValue,
+      etaSquared,
+      homoscedasticity,
+      postHoc
+    };
+  },
+
+  // 3.5 카이제곱 독립성/적합도 검정 (Chi-Square Test)
+  chiSquareTest(observed, expected = null, type = "independence") {
+    // type: "goodness" (적합도) 또는 "independence" (독립성)
+    if (type === "goodness") {
+      const n = observed.length;
+      if (n < 2) return { error: "적합도 검정을 위해 최소 2개 이상의 범주가 필요합니다." };
+      
+      const totalObs = observed.reduce((a, b) => a + b, 0);
+      let expValues = [];
+      if (!expected) {
+        // 기본값: 균등 분포
+        expValues = Array(n).fill(totalObs / n);
+      } else {
+        const totalExpProb = expected.reduce((a, b) => a + b, 0);
+        expValues = expected.map(p => (p / totalExpProb) * totalObs);
+      }
+
+      let chi2 = 0;
+      let lowExpectedCells = 0;
+      for (let i = 0; i < n; i++) {
+        if (expValues[i] < 5) lowExpectedCells++;
+        chi2 += Math.pow(observed[i] - expValues[i], 2) / expValues[i];
+      }
+
+      const df = n - 1;
+      const pVal = 1 - jStat.chisquare.cdf(chi2, df);
+      const lowCellPercent = (lowExpectedCells / n) * 100;
+
+      return {
+        method: "카이제곱 적합도 검정",
+        chi2Value: chi2,
+        df,
+        pValue: pVal,
+        observed,
+        expected: expValues,
+        warning: lowCellPercent > 20 ? "기대빈도가 5 미만인 범주가 20%를 초과하여 결과의 신뢰도가 떨어질 수 있습니다." : null
+      };
+
+    } else {
+      // 독립성 검정
+      // observed: 2차원 빈도 배열 [[n11, n12], [n21, n22]]
+      const r = observed.length;
+      const c = observed[0].length;
+      if (r < 2 || c < 2) return { error: "독립성 검정을 위해 최소 2x2 교차표가 필요합니다." };
+
+      const rowTotals = Array(r).fill(0);
+      const colTotals = Array(c).fill(0);
+      let grandTotal = 0;
+
+      for (let i = 0; i < r; i++) {
+        for (let j = 0; j < c; j++) {
+          rowTotals[i] += observed[i][j];
+          colTotals[j] += observed[i][j];
+          grandTotal += observed[i][j];
+        }
+      }
+
+      let chi2 = 0;
+      let lowExpectedCells = 0;
+      const expectedMatrix = [];
+
+      for (let i = 0; i < r; i++) {
+        expectedMatrix[i] = [];
+        for (let j = 0; j < c; j++) {
+          const exp = (rowTotals[i] * colTotals[j]) / grandTotal;
+          expectedMatrix[i][j] = exp;
+          if (exp < 5) lowExpectedCells++;
+          
+          if (exp > 0) {
+            chi2 += Math.pow(observed[i][j] - exp, 2) / exp;
+          }
+        }
+      }
+
+      const df = (r - 1) * (c - 1);
+      const pVal = 1 - jStat.chisquare.cdf(chi2, df);
+      const lowCellPercent = (lowExpectedCells / (r * c)) * 100;
+
+      // 효과크기 Cramér's V
+      const kMin = Math.min(r - 1, c - 1);
+      const cramersV = grandTotal > 0 && kMin > 0 ? Math.sqrt(chi2 / (grandTotal * kMin)) : 0;
+
+      return {
+        method: "카이제곱 독립성 검정",
+        chi2Value: chi2,
+        df,
+        pValue: pVal,
+        cramersV,
+        observed,
+        expected: expectedMatrix,
+        warning: lowCellPercent > 20 ? `기대빈도가 5 미만인 셀이 ${lowCellPercent.toFixed(1)}%로 전체의 20%를 초과합니다. 표본이 다소 부족할 수 있습니다.` : null
+      };
+    }
+  },
+
+  // 3.6 상관분석 (Pearson Correlation)
+  correlationAnalysis(xData, yData) {
+    const validPairsX = [];
+    const validPairsY = [];
+
+    for (let i = 0; i < xData.length; i++) {
+      const vx = parseFloat(xData[i]);
+      const vy = parseFloat(yData[i]);
+      if (!isNaN(vx) && !isNaN(vy)) {
+        validPairsX.push(vx);
+        validPairsY.push(vy);
+      }
+    }
+
+    const n = validPairsX.length;
+    if (n < 3) return { error: "상관 분석을 수행하려면 최소 3개 이상의 유효한 관측치 쌍이 필요합니다." };
+
+    const r = ss.sampleCorrelation(validPairsX, validPairsY);
+    
+    // 유의성 검정 t 통계량
+    const t = r * Math.sqrt((n - 2) / (1 - r * r));
+    const df = n - 2;
+    const pVal = 2 * (1 - jStat.studentt.cdf(Math.abs(t), df));
+
+    // r의 95% 신뢰구간 (Fisher Z-변환 이용)
+    let ciLower = null;
+    let ciUpper = null;
+    if (Math.abs(r) < 1.0 && n > 3) {
+      const z = 0.5 * Math.log((1 + r) / (1 - r));
+      const seZ = 1 / Math.sqrt(n - 3);
+      const zCrit = jStat.normal.inv(0.975, 0, 1);
+      const zLower = z - zCrit * seZ;
+      const zUpper = z + zCrit * seZ;
+      ciLower = (Math.exp(2 * zLower) - 1) / (Math.exp(2 * zLower) + 1);
+      ciUpper = (Math.exp(2 * zUpper) - 1) / (Math.exp(2 * zUpper) + 1);
+    }
+
+    return {
+      method: "피어슨 상관분석",
+      n,
+      correlationCoefficient: r,
+      tValue: t,
+      df,
+      pValue: pVal,
+      ciLower,
+      ciUpper
+    };
+  },
+
+  // 3.7 단순선형회귀분석 (Simple Linear Regression)
+  linearRegression(xData, yData) {
+    const validPairsX = [];
+    const validPairsY = [];
+
+    for (let i = 0; i < xData.length; i++) {
+      const vx = parseFloat(xData[i]);
+      const vy = parseFloat(yData[i]);
+      if (!isNaN(vx) && !isNaN(vy)) {
+        validPairsX.push(vx);
+        validPairsY.push(vy);
+      }
+    }
+
+    const n = validPairsX.length;
+    if (n < 3) return { error: "회귀분석을 위해 최소 3개 이상의 유효한 쌍이 필요합니다." };
+
+    // regression 계산 (simple-statistics 사용)
+    // ss.linearRegression은 { m: 기울기, b: 절편 } 반환
+    const points = validPairsX.map((x, idx) => [x, validPairsY[idx]]);
+    const regression = ss.linearRegression(points);
+    const slope = regression.m;
+    const intercept = regression.b;
+
+    // ANOVA 및 유의성 검정을 위한 계산
+    const meanX = ss.mean(validPairsX);
+    const meanY = ss.mean(validPairsY);
+
+    let ssTot = 0;
+    let ssReg = 0;
+    let ssRes = 0;
+    let sumSqX = 0;
+
+    for (let i = 0; i < n; i++) {
+      const x = validPairsX[i];
+      const y = validPairsY[i];
+      const predY = slope * x + intercept;
+
+      ssTot += Math.pow(y - meanY, 2);
+      ssReg += Math.pow(predY - meanY, 2);
+      ssRes += Math.pow(y - predY, 2);
+      sumSqX += Math.pow(x - meanX, 2);
+    }
+
+    const dfReg = 1;
+    const dfRes = n - 2;
+    const dfTot = n - 1;
+
+    const msReg = ssReg / dfReg;
+    const msRes = ssRes / dfRes;
+
+    const fValue = msRes > 0 ? msReg / msRes : 0;
+    const pValueF = 1 - jStat.centralF.cdf(fValue, dfReg, dfRes);
+
+    const r2 = ssTot > 0 ? ssReg / ssTot : 0;
+
+    // 회귀계수(기울기)의 t-검정
+    const seSlope = sumSqX > 0 ? Math.sqrt(msRes / sumSqX) : 0;
+    const tValue = seSlope > 0 ? slope / seSlope : 0;
+    const pValueSlope = 2 * (1 - jStat.studentt.cdf(Math.abs(tValue), dfRes));
+
+    return {
+      method: "단순선형회귀분석",
+      n,
+      slope,
+      intercept,
+      rSquared: r2,
+      adjustedRSquared: 1 - ((1 - r2) * (n - 1)) / (n - 2),
+      seSlope,
+      tValue,
+      pValueSlope,
+      fValue,
+      pValueF,
+      dfReg,
+      dfRes,
+      ssReg,
+      ssRes,
+      ssTot
+    };
+  }
+};

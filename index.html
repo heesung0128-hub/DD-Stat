@@ -1,0 +1,684 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>고등학생용 통계 분석 연구 노트 - Antigravity Stats</title>
+  <!-- SEO 및 메타데이터 -->
+  <meta name="description" content="고등학생을 위한 직관적이고 정확한 통계 분석 프로그램. 직접 모은 데이터를 손쉽게 시각화하고 올바른 추론통계를 수행해보세요.">
+  
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons (CDN) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- CSS Link -->
+  <link rel="stylesheet" href="style.css">
+  
+  <!-- External Libraries (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/jstat@1.9.6/dist/jstat.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/simple-statistics@7.8.3/dist/simple-statistics.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js" crossorigin="anonymous"></script>
+</head>
+<body>
+  
+  <!-- 메인 앱 컨테이너 -->
+  <div class="app-container">
+    
+    <!-- 1. 사이드바 (Sidebar) -->
+    <aside class="app-sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-logo">
+          <i class="fa-solid fa-chart-line-up"></i>
+        </div>
+        <div class="brand-text">
+          <h1>DD Stat</h1>
+          <span>동덕여고 통계 분석 프로그램</span>
+        </div>
+      </div>
+      
+      <!-- 데이터 정보 요약 카드 (사이드바 내 탑재) -->
+      <div class="sidebar-data-summary card glass">
+        <h3><i class="fa-solid fa-database"></i> 현재 데이터셋</h3>
+        <div id="data-status-empty" class="status-empty">
+          <p>데이터를 업로드해 주세요.</p>
+        </div>
+        <div id="data-status-active" class="status-active hidden">
+          <div class="info-row">
+            <span>총 행 수:</span>
+            <strong id="summary-rows">0</strong>
+          </div>
+          <div class="info-row">
+            <span>변수 개수:</span>
+            <strong id="summary-vars">0</strong>
+          </div>
+          <div class="info-row">
+            <span>결측 행:</span>
+            <strong id="summary-missing">0</strong>
+          </div>
+        </div>
+      </div>
+      
+      <!-- 네비게이션 메뉴 -->
+      <nav class="sidebar-nav">
+        <ul>
+          <li class="active" data-tab="tab-data">
+            <a href="#data"><i class="fa-solid fa-table"></i> 1. 데이터 입력 및 관리</a>
+          </li>
+          <li data-tab="tab-desc">
+            <a href="#desc"><i class="fa-solid fa-chart-pie"></i> 2. 기술통계 & 시각화</a>
+          </li>
+          <li data-tab="tab-infer">
+            <a href="#infer"><i class="fa-solid fa-calculator"></i> 3. 추론통계 분석</a>
+          </li>
+          <li data-tab="tab-prob">
+            <a href="#prob"><i class="fa-solid fa-dice-five"></i> 4. 확률분포 계산기</a>
+          </li>
+          <li data-tab="tab-guide">
+            <a href="#guide" id="btn-sidebar-guide"><i class="fa-solid fa-wand-magic-sparkles animate-pulse"></i> 5. 분석 추천 도우미</a>
+          </li>
+        </ul>
+      </nav>
+      
+      <!-- 테마 및 제어 스위치 -->
+      <div class="sidebar-footer">
+        <button id="btn-theme-toggle" class="btn-icon-label" title="테마 변경">
+          <i class="fa-solid fa-moon"></i> <span>다크 모드</span>
+        </button>
+        <div class="sidebar-copyright">
+          <p>본 프로그램은 동덕여고 수학과에서 제작하였으며<br>용도 외 사용 및 유포는 금지합니다.</p>
+        </div>
+      </div>
+    </aside>
+    
+    <!-- 2. 메인 콘텐츠 영역 (Main Content) -->
+    <main class="app-content">
+      
+      <!-- 상단 헤더 -->
+      <header class="content-header">
+        <div class="header-title">
+          <h2 id="current-tab-title">데이터 입력 및 관리</h2>
+          <p id="current-tab-subtitle">CSV/Excel 파일을 불러오거나 스프레드시트에 직접 데이터를 작성하세요.</p>
+        </div>
+        <div class="header-actions">
+          <button id="btn-reset-data" class="btn btn-secondary"><i class="fa-solid fa-rotate-left"></i> 데이터 초기화</button>
+          <a href="https://github.com" target="_blank" class="help-link"><i class="fa-solid fa-circle-question"></i> 도움말</a>
+        </div>
+      </header>
+      
+      <div class="content-body">
+        
+        <!-- ================= TAB 1: 데이터 입력 및 관리 ================= -->
+        <section id="tab-data" class="tab-pane active">
+          
+          <!-- 업로드 구역 -->
+          <div class="upload-section grid grid-2-1">
+            <div id="drop-zone" class="drop-zone card glass">
+              <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
+              <h3>이곳에 파일을 드래그하여 놓거나 클릭하세요</h3>
+              <p>CSV, XLSX, XLS 파일 지원 (최대 10MB)</p>
+              <input type="file" id="file-input" accept=".csv, .xlsx, .xls" class="hidden-input">
+              <button class="btn btn-primary mt-4">컴퓨터에서 파일 선택</button>
+            </div>
+            
+            <div class="sample-data-section card glass">
+              <h3><i class="fa-solid fa-lightbulb"></i> 샘플 데이터로 연습하기</h3>
+              <p>분석 기능을 시험해보려면 미리 준비된 데이터를 바로 불러올 수 있습니다.</p>
+              <div class="sample-btn-group">
+                <button class="btn btn-outline btn-sm" id="btn-sample-study">
+                  <i class="fa-solid fa-graduation-cap"></i> 학업 성취도 & 수면 시간 (연속형/상관)
+                </button>
+                <button class="btn btn-outline btn-sm" id="btn-sample-diet">
+                  <i class="fa-solid fa-burger"></i> 식습관 선호도 (범주형/카이제곱)
+                </button>
+                <button class="btn btn-outline btn-sm" id="btn-sample-score">
+                  <i class="fa-solid fa-medal"></i> 수학 점수 차이 (집단 간 t-검정/ANOVA)
+                </button>
+              </div>
+            </div>
+          </div>
+          
+          <!-- 데이터 관리 및 테이블 영역 -->
+          <div id="data-workspace" class="data-workspace card glass mt-6 hidden">
+            <div class="workspace-header">
+              <div class="action-left">
+                <h3><i class="fa-solid fa-table-list"></i> 업로드된 데이터 테이블</h3>
+                <span class="badge" id="data-info-badge">총 0행, 0열</span>
+              </div>
+              <div class="action-right">
+                <button class="btn btn-sm btn-outline" id="btn-add-row"><i class="fa-solid fa-plus"></i> 행 추가</button>
+                <button class="btn btn-sm btn-outline" id="btn-add-col"><i class="fa-solid fa-plus"></i> 열 추가</button>
+                <button class="btn btn-sm btn-danger" id="btn-delete-selected"><i class="fa-solid fa-trash-can"></i> 선택 삭제</button>
+              </div>
+            </div>
+            
+            <!-- 변수 속성 지정 영역 -->
+            <div class="variable-settings-panel">
+              <h4><i class="fa-solid fa-sliders"></i> 각 열(변수)의 유형 지정</h4>
+              <p class="description">올바른 분석 결과를 얻으려면 각 열의 <strong>변수 유형</strong>을 반드시 올바르게 설정해야 합니다.</p>
+              <div id="variable-cards-container" class="variable-cards-container">
+                <!-- Javascript로 동적 카드 추가 -->
+              </div>
+            </div>
+            
+            <!-- 결측값 / 가벼운 전처리 도구 -->
+            <div class="data-tools-panel grid grid-3">
+              <div class="tool-card">
+                <h5><i class="fa-solid fa-wand-magic"></i> 결측값(비어있는 값) 처리</h5>
+                <div class="form-group mt-2">
+                  <select id="select-missing-handler" class="form-control">
+                    <option value="exclude">결측값이 있는 행 제외하기 (권장)</option>
+                    <option value="mean">해당 변수의 평균값으로 대체하기</option>
+                    <option value="zero">0으로 대체하기</option>
+                  </select>
+                  <button class="btn btn-sm btn-primary mt-2 w-100" id="btn-apply-missing">전처리 적용</button>
+                </div>
+              </div>
+              
+              <div class="tool-card">
+                <h5><i class="fa-solid fa-rotate"></i> 리커트 척도 역코딩</h5>
+                <p class="tool-desc">부정 질문 등의 답변 척도를 거꾸로 뒤집습니다 (예: 5점 만점에서 5→1, 4→2).</p>
+                <div class="form-group grid grid-2 gap-2 mt-2">
+                  <select id="select-recode-col" class="form-control">
+                    <option value="">변수 선택</option>
+                  </select>
+                  <select id="select-recode-scale" class="form-control">
+                    <option value="5">5점 척도</option>
+                    <option value="7">7점 척도</option>
+                  </select>
+                </div>
+                <button class="btn btn-sm btn-primary mt-2 w-100" id="btn-apply-recode">역코딩 변환</button>
+              </div>
+              
+              <div class="tool-card">
+                <h5><i class="fa-solid fa-magnifying-glass-chart"></i> 이상치 탐색</h5>
+                <p class="tool-desc">상자그림(Boxplot) 기준에 따라 극단적이거나 잘못 입력되었을 가능성이 있는 값을 식별합니다.</p>
+                <button class="btn btn-sm btn-secondary mt-4 w-100" id="btn-detect-outliers">이상치 즉시 찾기</button>
+              </div>
+            </div>
+            
+            <!-- 실제 데이터 테이블 -->
+            <div class="table-scroll-container">
+              <table id="main-data-table" class="data-table">
+                <thead>
+                  <tr id="table-header-row">
+                    <!-- Javascript가 헤더 렌더링 -->
+                  </tr>
+                </thead>
+                <tbody id="table-body-rows">
+                  <!-- Javascript가 행 렌더링 -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+        
+        <!-- ================= TAB 2: 기술통계 & 시각화 ================= -->
+        <section id="tab-desc" class="tab-pane">
+          <div class="grid grid-1-3">
+            
+            <!-- 설정 패널 (좌측) -->
+            <div class="control-panel card glass">
+              <h3><i class="fa-solid fa-gears"></i> 분석 변수 선택</h3>
+              
+              <div class="form-group mt-4">
+                <label for="desc-select-var1">분석할 변수 (주요 변수):</label>
+                <select id="desc-select-var1" class="form-control mt-1">
+                  <option value="">-- 변수를 선택해 주세요 --</option>
+                </select>
+              </div>
+              
+              <div class="form-group mt-4">
+                <label for="desc-select-var2">교차비교 변수 (선택사항, 범주형 전용):</label>
+                <select id="desc-select-var2" class="form-control mt-1">
+                  <option value="">-- 선택 안함 (단일 분석) --</option>
+                </select>
+                <p class="input-tip mt-1">두 변수를 함께 고르면 <strong>교차표</strong> 및 <strong>이변량 차트</strong>를 생성할 수 있습니다.</p>
+              </div>
+              
+              <div class="form-group mt-4">
+                <label for="desc-chart-type">그래프 유형:</label>
+                <select id="desc-chart-type" class="form-control mt-1">
+                  <option value="auto">자동 추천 그래프</option>
+                  <option value="histogram">히스토그램 (연속형 데이터 분포)</option>
+                  <option value="boxplot">상자그림 (Box Plot, 중앙값과 사분위수)</option>
+                  <option value="bar">막대 그래프 (범주형 빈도 비교)</option>
+                  <option value="pie">원 그래프 (Pie, 범주 비율)</option>
+                  <option value="scatter">산점도 (Scatter, 두 연속형 변수의 분포)</option>
+                  <option value="stemleaf">줄기-잎 그림 (수치 시각화)</option>
+                </select>
+              </div>
+              
+              <button id="btn-run-desc" class="btn btn-primary w-100 mt-6"><i class="fa-solid fa-chart-simple"></i> 통계 및 그래프 생성</button>
+            </div>
+            
+            <!-- 결과 패널 (우측) -->
+            <div class="results-panel">
+              
+              <div id="desc-results-empty" class="card glass text-center py-12">
+                <i class="fa-solid fa-circle-info fa-2x text-muted"></i>
+                <p class="mt-4">좌측 패널에서 변수를 고르고 [통계 및 그래프 생성] 버튼을 눌러주세요.</p>
+              </div>
+              
+              <div id="desc-results-content" class="hidden">
+                <!-- 기술통계 표 카드 -->
+                <div class="card glass mb-6">
+                  <div class="card-header-actions">
+                    <h3><i class="fa-solid fa-table"></i> 기초 기술통계 요약</h3>
+                    <button class="btn btn-xs btn-outline btn-copy-table" data-target="desc-table"><i class="fa-solid fa-copy"></i> 표 복사</button>
+                  </div>
+                  <div class="table-container mt-4">
+                    <table id="desc-table" class="data-table-result">
+                      <!-- 동적 생성 -->
+                    </table>
+                  </div>
+                </div>
+                
+                <!-- 시각화 차트 카드 -->
+                <div class="card glass mb-6">
+                  <div class="card-header-actions">
+                    <h3><i class="fa-solid fa-chart-line"></i> 데이터 시각화</h3>
+                    <button id="btn-download-desc-chart" class="btn btn-xs btn-outline"><i class="fa-solid fa-download"></i> 이미지(PNG) 저장</button>
+                  </div>
+                  <div class="chart-wrapper mt-4">
+                    <canvas id="desc-chart"></canvas>
+                    <div id="stem-leaf-display" class="stem-leaf-box hidden"></div>
+                  </div>
+                </div>
+                
+                <!-- 한국어 설명/요약 해석 -->
+                <div class="card glass border-left-primary">
+                  <h3><i class="fa-solid fa-comment-dots"></i> 한눈에 보는 데이터 해석</h3>
+                  <div id="desc-korean-interpretation" class="interpretation-text mt-2">
+                    <!-- 해석 문장 렌더링 -->
+                  </div>
+                </div>
+                
+              </div>
+            </div>
+            
+          </div>
+        </section>
+        
+        <!-- ================= TAB 3: 추론통계 분석 ================= -->
+        <section id="tab-infer" class="tab-pane">
+          
+          <!-- 분석 방식 및 사전 가설 설정 마법사 -->
+          <div class="grid grid-1-3">
+            
+            <!-- 설정 패널 (좌측) -->
+            <div class="control-panel card glass">
+              <h3><i class="fa-solid fa-clipboard-question"></i> 분석 가설 설계</h3>
+              
+              <div class="form-group mt-4">
+                <label for="infer-method">원하는 분석 검정 선택:</label>
+                <select id="infer-method" class="form-control mt-1">
+                  <option value="ci">1. 모평균의 신뢰구간 추정</option>
+                  <option value="ind-t">2. 독립표본 t-검정 (두 집단 평균 비교)</option>
+                  <option value="paired-t">3. 대응표본 t-검정 (동일 집단 사전/사후 비교)</option>
+                  <option value="anova">4. 일원분산분석 (ANOVA, 세 집단 이상 비교)</option>
+                  <option value="chisq-fit">5. 카이제곱 적합도 검정 (실제 비율이 특정 분포와 일치하는가)</option>
+                  <option value="chisq-ind">6. 카이제곱 독립성 검정 (두 범주형 변수의 연관성)</option>
+                  <option value="correlation">7. 피어슨 상관분석 (두 연속변수 간 선형 연관성)</option>
+                  <option value="regression">8. 단순선형회귀분석 (독립변수를 통한 종속변수 예측 - 고급 모드)</option>
+                </select>
+              </div>
+              
+              <!-- 동적으로 바뀌는 변수 선택 구역 -->
+              <div id="infer-variables-container" class="mt-4 border-top pt-4">
+                <!-- Javascript가 채움 -->
+              </div>
+              
+              <!-- [오용방지용 가설 입력 박스] -->
+              <div class="form-group mt-4 border-top pt-4" id="hypothesis-step-panel">
+                <label for="txt-hypothesis" class="label-badge-group">
+                  <span>연구 가설 적어보기 (필수)</span>
+                  <span class="badge badge-info">오용 방지</span>
+                </label>
+                <textarea id="txt-hypothesis" class="form-control mt-1" rows="2" placeholder="예: '스마트폰 사용 시간이 길수록 수면 시간이 짧아질 것이다.'"></textarea>
+                <p class="input-tip mt-1">데이터 분석 전에 내가 검증하고자 하는 구체적인 가설을 먼저 세워야 분석 오용(p-hacking)을 막을 수 있습니다.</p>
+              </div>
+              
+              <button id="btn-run-infer" class="btn btn-primary w-100 mt-6"><i class="fa-solid fa-play"></i> 추론통계 검정 실행</button>
+            </div>
+            
+            <!-- 결과 출력 구역 (우측) -->
+            <div class="results-panel">
+              
+              <div id="infer-results-empty" class="card glass text-center py-12">
+                <i class="fa-solid fa-circle-question fa-2x text-muted"></i>
+                <p class="mt-4">좌측 패널에서 분석 종류를 선택하고, 변수와 가설을 입력한 후 [추론통계 검정 실행] 버튼을 눌러주세요.</p>
+              </div>
+              
+              <div id="infer-results-content" class="hidden">
+                
+                <!-- 1. 가설 확인 배너 -->
+                <div class="card glass border-left-info mb-6 py-4">
+                  <div class="hypothesis-summary">
+                    <span class="badge badge-info">연구 가설</span>
+                    <p class="mt-2 text-italic" id="display-hypothesis">"작성한 가설이 없습니다."</p>
+                  </div>
+                </div>
+                
+                <!-- 2. 가정 검정 대시보드 (오용방지 핵심) -->
+                <div class="card glass mb-6" id="assumption-dashboard">
+                  <h3><i class="fa-solid fa-shield-halved"></i> 통계적 기본 가정 점검 결과</h3>
+                  <div class="assumption-list mt-4" id="assumption-list-container">
+                    <!-- 동적 생성 -->
+                  </div>
+                </div>
+                
+                <!-- 3. 통계적 주요 수치 테이블 -->
+                <div class="card glass mb-6">
+                  <div class="card-header-actions">
+                    <h3 id="infer-table-title"><i class="fa-solid fa-table-cells"></i> 통계 분석 요약표</h3>
+                    <button class="btn btn-xs btn-outline btn-copy-table" data-target="infer-result-table"><i class="fa-solid fa-copy"></i> 표 복사</button>
+                  </div>
+                  <div class="table-container mt-4">
+                    <table id="infer-result-table" class="data-table-result">
+                      <!-- 동적 생성 -->
+                    </table>
+                  </div>
+                </div>
+                
+                <!-- 4. 사후 분석 결과 (ANOVA 한정) -->
+                <div class="card glass mb-6 hidden" id="anova-posthoc-card">
+                  <div class="card-header-actions">
+                    <h3><i class="fa-solid fa-code-compare"></i> Tukey-Kramer 사후 검정 (다중 비교)</h3>
+                    <button class="btn btn-xs btn-outline btn-copy-table" data-target="anova-posthoc-table"><i class="fa-solid fa-copy"></i> 표 복사</button>
+                  </div>
+                  <p class="description mt-1">ANOVA 검정에서 유의한 차이가 난 경우, 구체적으로 어떤 집단 쌍에서 유의한 차이가 나타났는지 다중비교 보정을 통해 식별합니다.</p>
+                  <div class="table-container mt-4">
+                    <table id="anova-posthoc-table" class="data-table-result">
+                      <!-- 동적 생성 -->
+                    </table>
+                  </div>
+                </div>
+                
+                <!-- 5. 시각화 (회귀선 등) -->
+                <div class="card glass mb-6 hidden" id="infer-chart-card">
+                  <div class="card-header-actions">
+                    <h3><i class="fa-solid fa-chart-line"></i> 분석 시각화</h3>
+                    <button id="btn-download-infer-chart" class="btn btn-xs btn-outline"><i class="fa-solid fa-download"></i> 이미지 저장</button>
+                  </div>
+                  <div class="chart-wrapper mt-4">
+                    <canvas id="infer-chart"></canvas>
+                  </div>
+                </div>
+                
+                <!-- 6. 한글 보고용 자연어 해석 (효과크기 포함) -->
+                <div class="card glass border-left-success mb-6">
+                  <h3><i class="fa-solid fa-square-poll-vertical"></i> 한국어 보고 및 해석 문장</h3>
+                  <div id="infer-korean-interpretation" class="interpretation-text mt-4">
+                    <!-- 해석 문장 렌더링 -->
+                  </div>
+                  
+                  <!-- [중요] 한계 및 인과 단정 경고판 -->
+                  <div class="interpretation-limit-alert mt-4" id="interpretation-limit-box">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                    <span id="interpretation-limit-text">이 분석은 상관관계 분석입니다. 스마트폰 사용 시간과 수면 시간의 관계가 깊다는 것은 입증할 수 있으나, 스마트폰이 수면을 단축시키는 원인(인과관계)이라는 것을 의미하지는 않습니다. 다른 외부 변수가 개입했을 수 있음에 주의하십시오.</span>
+                  </div>
+                </div>
+                
+              </div>
+              
+            </div>
+            
+          </div>
+        </section>
+        
+        <!-- ================= TAB 4: 확률분포 계산기 ================= -->
+        <section id="tab-prob" class="tab-pane">
+          <div class="grid grid-1-3">
+            
+            <!-- 설정 패널 (좌측) -->
+            <div class="control-panel card glass">
+              <h3><i class="fa-solid fa-chart-area"></i> 확률분포 매개변수 설정</h3>
+              
+              <div class="form-group mt-4">
+                <label for="prob-dist-type">분포 선택:</label>
+                <select id="prob-dist-type" class="form-control mt-1">
+                  <option value="normal">정규분포 (Normal Distribution)</option>
+                  <option value="binomial">이항분포 (Binomial Distribution)</option>
+                </select>
+              </div>
+              
+              <!-- 정규분포용 설정 -->
+              <div id="prob-normal-params" class="dist-params mt-4">
+                <div class="form-group">
+                  <label for="input-norm-mean">평균 (μ):</label>
+                  <input type="number" id="input-norm-mean" class="form-control mt-1" value="0" step="any">
+                </div>
+                <div class="form-group mt-3">
+                  <label for="input-norm-std">표준편차 (σ):</label>
+                  <input type="number" id="input-norm-std" class="form-control mt-1" value="1" step="any" min="0.0001">
+                </div>
+              </div>
+              
+              <!-- 이항분포용 설정 -->
+              <div id="prob-binomial-params" class="dist-params mt-4 hidden">
+                <div class="form-group">
+                  <label for="input-bin-n">시행 횟수 (n):</label>
+                  <input type="number" id="input-bin-n" class="form-control mt-1" value="10" min="1" step="1">
+                </div>
+                <div class="form-group mt-3">
+                  <label for="input-bin-p">성공 확률 (p):</label>
+                  <input type="number" id="input-bin-p" class="form-control mt-1" value="0.5" min="0" max="1" step="0.01">
+                </div>
+              </div>
+              
+              <!-- 확률 계산 범위 지정 -->
+              <div class="form-group mt-4 border-top pt-4">
+                <label for="select-prob-range">계산할 확률 범위:</label>
+                <select id="select-prob-range" class="form-control mt-1">
+                  <option value="less">X ≤ a (이하)</option>
+                  <option value="greater">X ≥ a (이상)</option>
+                  <option value="between">a ≤ X ≤ b (구간)</option>
+                </select>
+              </div>
+              
+              <div class="form-group mt-3">
+                <label for="input-prob-a">값 a:</label>
+                <input type="number" id="input-prob-a" class="form-control mt-1" value="0" step="any">
+              </div>
+              
+              <div class="form-group mt-3 hidden" id="group-prob-b">
+                <label for="input-prob-b">값 b:</label>
+                <input type="number" id="input-prob-b" class="form-control mt-1" value="1" step="any">
+              </div>
+              
+              <button id="btn-run-prob" class="btn btn-primary w-100 mt-6"><i class="fa-solid fa-calculator"></i> 확률 계산 및 그래프 그리기</button>
+            </div>
+            
+            <!-- 결과 패널 (우측) -->
+            <div class="results-panel">
+              <div class="card glass mb-6">
+                <h3><i class="fa-solid fa-percent"></i> 확률 계산 결과</h3>
+                <div class="probability-result-display mt-4">
+                  <span class="prob-expression" id="display-prob-expr">P(X ≤ 0) = </span>
+                  <span class="prob-value" id="display-prob-val">0.5000</span>
+                  <span class="prob-percent" id="display-prob-pct">(50.00%)</span>
+                </div>
+                <div class="info-row mt-4" id="dist-summary-info">
+                  <!-- 분포별 통계치 정보 (평균, 분산) -->
+                </div>
+              </div>
+              
+              <div class="card glass">
+                <div class="card-header-actions">
+                  <h3><i class="fa-solid fa-chart-area"></i> 확률밀도/질량함수 시각화</h3>
+                  <button id="btn-download-prob-chart" class="btn btn-xs btn-outline"><i class="fa-solid fa-download"></i> 이미지 저장</button>
+                </div>
+                <div class="chart-wrapper mt-4">
+                  <canvas id="prob-chart"></canvas>
+                </div>
+              </div>
+            </div>
+            
+          </div>
+        </section>
+        
+        <!-- ================= TAB 5: 분석 추천 도우미 ================= -->
+        <section id="tab-guide" class="tab-pane">
+          <div class="card glass max-w-2xl mx-auto py-8">
+            <div class="wizard-header text-center">
+              <div class="wizard-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+              <h2>분석 추천 도우미</h2>
+              <p>수집한 데이터와 연구 목적을 바탕으로 가장 적절한 통계 분석을 추천해 드립니다.</p>
+            </div>
+            
+            <div class="wizard-progress mt-6">
+              <div class="progress-bar" id="wizard-progress-bar" style="width: 25%;"></div>
+            </div>
+            
+            <!-- 단계별 콘텐츠 -->
+            <div class="wizard-body mt-8">
+              
+              <!-- STEP 1: 비교/확인 목적 -->
+              <div class="wizard-step active" id="wizard-step-1">
+                <h3>Q1. 무엇을 알고 싶으신가요? (연구의 주된 목적)</h3>
+                <div class="wizard-options mt-4">
+                  <label class="wizard-option-card">
+                    <input type="radio" name="opt-purpose" value="compare" checked>
+                    <div class="option-content">
+                      <span class="option-title">집단 간 평균 비교</span>
+                      <span class="option-desc">예: "남학생과 여학생의 수학 점수가 다른가?", "학년별 국어 평균이 다른가?"</span>
+                    </div>
+                  </label>
+                  
+                  <label class="wizard-option-card">
+                    <input type="radio" name="opt-purpose" value="relation">
+                    <div class="option-content">
+                      <span class="option-title">변수 간 연관성 / 예측</span>
+                      <span class="option-desc">예: "공부 시간과 수학 성적 사이에 선형 관계가 있는가?", "독서량이 점수에 주는 영향은?"</span>
+                    </div>
+                  </label>
+                  
+                  <label class="wizard-option-card">
+                    <input type="radio" name="opt-purpose" value="proportion">
+                    <div class="option-content">
+                      <span class="option-title">비율 / 빈도의 분포 차이</span>
+                      <span class="option-desc">예: "요일별 급식 만족 여부의 빈도 차이가 있는가?", "혈액형별 선호도 분포?"</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+              
+              <!-- STEP 2: 집단 수 (비교 선택 시) -->
+              <div class="wizard-step" id="wizard-step-2">
+                <h3>Q2. 비교하려는 대상(집단)은 몇 개인가요?</h3>
+                <div class="wizard-options mt-4">
+                  <label class="wizard-option-card">
+                    <input type="radio" name="opt-groups" value="2" checked>
+                    <div class="option-content">
+                      <span class="option-title">2개 집단</span>
+                      <span class="option-desc">예: "남학생 vs 여학생", "실험군 vs 대조군"</span>
+                    </div>
+                  </label>
+                  
+                  <label class="wizard-option-card">
+                    <input type="radio" name="opt-groups" value="3plus">
+                    <div class="option-content">
+                      <span class="option-title">3개 집단 이상</span>
+                      <span class="option-desc">예: "1학년 vs 2학년 vs 3학년", "A형 vs B형 vs O형 vs AB형"</span>
+                    </div>
+                  </label>
+                  
+                  <label class="wizard-option-card">
+                    <input type="radio" name="opt-groups" value="paired">
+                    <div class="option-content">
+                      <span class="option-title">동일한 집단의 전/후 비교</span>
+                      <span class="option-desc">예: "훈련 프로그램 참가 전 점수 vs 참가 후 점수"</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+              
+              <!-- STEP 3: 변수 종류 (연관성 선택 시) -->
+              <div class="wizard-step" id="wizard-step-3">
+                <h3>Q2. 변수들은 주로 어떤 형태인가요?</h3>
+                <div class="wizard-options mt-4">
+                  <label class="wizard-option-card">
+                    <input type="radio" name="opt-var-type" value="continuous" checked>
+                    <div class="option-content">
+                      <span class="option-title">둘 다 연속형 수치 (키, 점수, 시간 등)</span>
+                      <span class="option-desc">예: "수면 시간과 성적"의 선형 관계 확인 또는 예측</span>
+                    </div>
+                  </label>
+                  
+                  <label class="wizard-option-card">
+                    <input type="radio" name="opt-var-type" value="categorical">
+                    <div class="option-content">
+                      <span class="option-title">둘 다 범주형 그룹 (성별, 찬반, 주거 지역 등)</span>
+                      <span class="option-desc">예: "성별(남/여)과 찬반(찬성/반대) 간의 연관성"</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+              
+              <!-- STEP 4: 결과 추천 및 분석 링크 -->
+              <div class="wizard-step" id="wizard-step-4">
+                <div class="recommendation-result text-center">
+                  <i class="fa-solid fa-square-check text-success fa-3x"></i>
+                  <h3 class="mt-4">이러한 연구 목적에는 아래의 분석을 권장합니다!</h3>
+                  
+                  <div class="recommendation-box mt-6">
+                    <h2 id="rec-analysis-name">독립표본 t-검정</h2>
+                    <p id="rec-analysis-desc" class="mt-2">두 독립적인 집단(예: 남학생과 여학생)의 평균 차이가 통계적으로 유의미한지 알아봅니다.</p>
+                  </div>
+                  
+                  <div class="alert alert-info mt-6 text-left">
+                    <h5><i class="fa-solid fa-graduation-cap"></i> 데이터 요구조건(가정):</h5>
+                    <ul id="rec-analysis-assumptions" class="mt-2">
+                      <li>정규성 가정: 각 집단의 데이터가 정규분포를 따라야 합니다.</li>
+                      <li>등분산성 가정: 두 집단의 흩어진 정도(분산)가 유사해야 합니다.</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+              
+            </div>
+            
+            <div class="wizard-footer mt-8">
+              <button class="btn btn-secondary hidden" id="btn-wizard-prev">이전 단계</button>
+              <button class="btn btn-primary" id="btn-wizard-next">다음 단계</button>
+              <button class="btn btn-success hidden" id="btn-wizard-go">추천된 분석 시작하기 <i class="fa-solid fa-circle-chevron-right"></i></button>
+            </div>
+          </div>
+        </section>
+        
+      </div>
+      
+    </main>
+    
+  </div>
+  
+  <!-- 공통 모달: 이상치 경고 및 대화 상자 -->
+  <div id="outlier-modal" class="modal-backdrop hidden">
+    <div class="modal card glass">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-triangle-exclamation text-warning"></i> 이상치 탐색 결과</h3>
+        <button class="btn-close" id="btn-close-outlier"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <p class="description">상자그림(Box Plot) 기준($Q1 - 1.5 \times IQR$ 미만이거나 $Q3 + 1.5 \times IQR$ 초과)으로 탐지된 이상치 목록입니다. 극단적이거나 오기입된 데이터인지 점검해 보세요.</p>
+        <div id="outlier-results-list" class="outlier-results-list mt-4">
+          <!-- Javascript 렌더링 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="btn-confirm-outlier">확인</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Script Link -->
+  <script src="stats-helper.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
