@@ -42,11 +42,47 @@ const AppState = {
   data: [],        // 행 객체 배열: [{ 'Sleep_Hours': 7.5, 'Academic_Score': 85 }, ...]
   headers: [],     // 열 이름 배열: ['Sleep_Hours', 'Academic_Score']
   colTypes: {},    // 열 유형: { 'Sleep_Hours': 'continuous', 'Academic_Score': 'continuous' }
+  valueLabels: {}, // 값 레이블 매핑: { '성별': { '1': '남자', '2': '여자' } }
   chartInstance: null, // Chart.js 인스턴스
   selectedRows: new Set(), // 삭제용 선택 행 번호
   hypothesis: "",  // 연구 가설
   theme: "light"   // 테마: light / dark
 };
+
+// --- 값 레이블 (Value Labels) 헬퍼 함수 ---
+function getValueLabelsString(col) {
+  const map = AppState.valueLabels[col];
+  if (!map) return "";
+  return Object.keys(map).map(k => `${k}=${map[k]}`).join(", ");
+}
+
+function parseValueLabelsString(col, str) {
+  if (!str || !str.trim()) {
+    AppState.valueLabels[col] = {};
+    return;
+  }
+  const map = {};
+  const pairs = str.split(",");
+  pairs.forEach(p => {
+    const parts = p.split("=");
+    if (parts.length === 2) {
+      const k = parts[0].trim();
+      const v = parts[1].trim();
+      if (k && v) {
+        map[k] = v;
+      }
+    }
+  });
+  AppState.valueLabels[col] = map;
+}
+
+function getValLabel(col, val) {
+  const strVal = String(val).trim();
+  if (AppState.valueLabels[col] && AppState.valueLabels[col][strVal] !== undefined) {
+    return AppState.valueLabels[col][strVal];
+  }
+  return val;
+}
 
 // --- DOM 로드 시 초기화 ---
 document.addEventListener("DOMContentLoaded", () => {
@@ -249,6 +285,7 @@ function handleUploadedFile(file) {
 }
 
 function processRawData(parsedRows, fields) {
+  AppState.valueLabels = {}; // 값 레이블 초기화
   AppState.headers = fields;
   AppState.data = parsedRows.map(row => {
     const cleanRow = {};
@@ -417,15 +454,32 @@ function updateDataWorkspace() {
       });
     });
     card.appendChild(select);
-    cardsContainer.innerHTML += card.outerHTML;
-  });
-  
-  // 수동 이벤트 재바인딩
-  const selects = cardsContainer.querySelectorAll("select");
-  AppState.headers.forEach((h, idx) => {
-    selects[idx].addEventListener("change", (e) => {
-      AppState.colTypes[h] = e.target.value;
+
+    // 값 레이블 설정 입력 영역 추가
+    const labelInputGroup = document.createElement("div");
+    labelInputGroup.className = "mt-2";
+    
+    const labelTitle = document.createElement("label");
+    labelTitle.style.fontSize = "11px";
+    labelTitle.style.display = "block";
+    labelTitle.style.marginBottom = "2px";
+    labelTitle.textContent = "값 레이블 (예: 1=남, 2=여)";
+    
+    const labelInput = document.createElement("input");
+    labelInput.type = "text";
+    labelInput.className = "form-control label-input mt-1";
+    labelInput.placeholder = "예: 1=남, 2=여";
+    labelInput.value = getValueLabelsString(h);
+    
+    labelInput.addEventListener("change", (e) => {
+      parseValueLabelsString(h, e.target.value);
     });
+
+    labelInputGroup.appendChild(labelTitle);
+    labelInputGroup.appendChild(labelInput);
+    card.appendChild(labelInputGroup);
+
+    cardsContainer.appendChild(card);
   });
 
   // 2. 실제 데이터 테이블 렌더링
@@ -757,7 +811,8 @@ function runDescriptiveAnalysis() {
       const freqs = StatsHelper.calculateFrequency(data1);
       let html = `<tr><th>범주 값</th><th>빈도 (Count)</th><th>비율 (Percentage)</th></tr>`;
       freqs.list.forEach(item => {
-        html += `<tr><td><strong>${item.value}</strong></td><td>${item.count}명</td><td>${item.percentage.toFixed(1)}%</td></tr>`;
+        const valLabel = getValLabel(var1, item.value);
+        html += `<tr><td><strong>${valLabel}</strong></td><td>${item.count}명</td><td>${item.percentage.toFixed(1)}%</td></tr>`;
       });
       html += `<tr class="highlight-row"><td><strong>합계</strong></td><td>${freqs.total}명</td><td>100.0%</td></tr>`;
       descTable.innerHTML = html;
@@ -774,11 +829,11 @@ function runDescriptiveAnalysis() {
     const cross = StatsHelper.calculateCrossTab(data1, data2);
     
     let html = `<tr><th>${var1} \\ ${var2}</th>`;
-    cross.cols.forEach(c => { html += `<th>${c}</th>`; });
+    cross.cols.forEach(c => { html += `<th>${getValLabel(var2, c)}</th>`; });
     html += `<th>합계</th></tr>`;
     
     cross.rows.forEach(r => {
-      html += `<tr><td><strong>${r}</strong></td>`;
+      html += `<tr><td><strong>${getValLabel(var1, r)}</strong></td>`;
       cross.cols.forEach(c => {
         html += `<td>${cross.table[r][c]}명</td>`;
       });
@@ -973,7 +1028,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
   } else if (chartType === "bar") {
     // 빈도 막대 그래프
     const freqs = StatsHelper.calculateFrequency(data1);
-    const labels = freqs.list.map(l => l.value);
+    const labels = freqs.list.map(l => getValLabel(var1, l.value));
     const values = freqs.list.map(l => l.count);
 
     AppState.chartInstance = new Chart(ctx, {
@@ -1003,7 +1058,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
   } else if (chartType === "pie") {
     // 비율 파이 차트
     const freqs = StatsHelper.calculateFrequency(data1);
-    const labels = freqs.list.map(l => l.value);
+    const labels = freqs.list.map(l => getValLabel(var1, l.value));
     const values = freqs.list.map(l => l.count);
 
     AppState.chartInstance = new Chart(ctx, {
@@ -1123,7 +1178,7 @@ function renderDescInterpretation(var1, var2) {
       const freqs = StatsHelper.calculateFrequency(data1);
       const top = freqs.list[0];
       box.innerHTML = `
-        <p>범주형 변수 <strong>'${var1}'</strong>의 빈도를 분석한 결과, 가장 높은 비율을 차지한 항목은 <strong>'${top.value}'</strong>(으)로 총 <strong>${top.count}명 (${top.percentage.toFixed(1)}%)</strong>이 응답했습니다.</p>
+        <p>범주형 변수 <strong>'${var1}'</strong>의 빈도를 분석한 결과, 가장 높은 비율을 차지한 항목은 <strong>'${getValLabel(var1, top.value)}'</strong>(으)로 총 <strong>${top.count}명 (${top.percentage.toFixed(1)}%)</strong>이 응답했습니다.</p>
         <p>이어서 범주의 고른 분포 형태를 보이며, 총 <strong>${freqs.total}명</strong>의 응답이 정리되었습니다. 보고서의 기초 현황 테이블에 그대로 인용하실 수 있습니다.</p>
       `;
     }
@@ -1425,8 +1480,8 @@ function runIndependentTTestAnalysis() {
   const homos = StatsHelper.checkHomoscedasticity([dataA, dataB]);
 
   // 커스텀 리포트
-  normA.reason = `'${gA}' 집단의 정규성: ` + normA.reason;
-  normB.reason = `'${gB}' 집단의 정규성: ` + normB.reason;
+  normA.reason = `'${getValLabel(groupVar, gA)}' 집단의 정규성: ` + normA.reason;
+  normB.reason = `'${getValLabel(groupVar, gB)}' 집단의 정규성: ` + normB.reason;
   renderAssumptionDashboard([normA, normB, homos]);
 
   // 2. 검정 연산
@@ -1443,8 +1498,8 @@ function runIndependentTTestAnalysis() {
   table.innerHTML = `
     <tr><th>통계 지표</th><th>결과값</th><th>설명</th></tr>
     <tr><td><strong>검정 방식</strong></td><td>${tResult.method}</td><td>집단 간 분산 특성에 따른 수식 반영</td></tr>
-    <tr><td><strong>집단 A (${gA}) 평균 (N)</strong></td><td>${tResult.groupAInfo.mean.toFixed(3)} (n=${tResult.groupAInfo.n})</td><td>첫 번째 비교 집단의 통계량</td></tr>
-    <tr><td><strong>집단 B (${gB}) 평균 (N)</strong></td><td>${tResult.groupBInfo.mean.toFixed(3)} (n=${tResult.groupBInfo.n})</td><td>두 번째 비교 집단의 통계량</td></tr>
+    <tr><td><strong>집단 A (${getValLabel(groupVar, gA)}) 평균 (N)</strong></td><td>${tResult.groupAInfo.mean.toFixed(3)} (n=${tResult.groupAInfo.n})</td><td>첫 번째 비교 집단의 통계량</td></tr>
+    <tr><td><strong>집단 B (${getValLabel(groupVar, gB)}) 평균 (N)</strong></td><td>${tResult.groupBInfo.mean.toFixed(3)} (n=${tResult.groupBInfo.n})</td><td>두 번째 비교 집단의 통계량</td></tr>
     <tr><td><strong>t-통계량 (t)</strong></td><td>${tResult.tValue.toFixed(3)}</td><td>두 평균 차이가 표본오차의 몇 배인가를 보인 통계치</td></tr>
     <tr><td><strong>자유도 (df)</strong></td><td>${tResult.df.toFixed(2)}</td><td>검정에 사용된 유효 표본 정보 단위 수</td></tr>
     <tr class="highlight-row"><td><strong>유의확률 (p-value)</strong></td><td><strong>${tResult.pValue.toFixed(4)}</strong> (${sig})</td><td>실제 차이가 없는데 우연히 이런 결과가 나올 확률</td></tr>
@@ -1462,7 +1517,7 @@ function runIndependentTTestAnalysis() {
   else if (tResult.cohensD >= 0.2) effectLabel = "작은 효과 크기";
 
   interpretation.innerHTML = `
-    <p><strong>'${groupVar}'</strong>에 속한 두 집단(${gA} vs ${gB}) 간에 <strong>'${varName}'</strong>의 평균에 유의미한 차이가 있는지 독립표본 t-검정을 실시하였습니다.</p>
+    <p><strong>'${groupVar}'</strong>에 속한 두 집단(${getValLabel(groupVar, gA)} vs ${getValLabel(groupVar, gB)}) 간에 <strong>'${varName}'</strong>의 평균에 유의미한 차이가 있는지 독립표본 t-검정을 실시하였습니다.</p>
     <p>검정 결과, 두 집단의 평균값 차이는 <strong>${tResult.diff.toFixed(2)}</strong>이며, 이 차이는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${tResult.tValue.toFixed(2)}, p = ${tResult.pValue.toFixed(3)}).</p>
     <p>${isSig ? `즉, 우연히 이러한 차이가 관측될 확률이 5% 미만이므로, 두 집단 간에는 실제 평균 점수 차이가 존재한다고 결론 내릴 수 있습니다.` : `즉, 우연한 요인으로 발생할 수 있는 수준의 미미한 차이이므로, 두 집단 간에는 실제 평균적인 차이가 없다고 해석합니다.`}</p>
     <p>추가로 분석된 두 집단 차이의 실질적인 크기(효과크기, Cohen's d)는 <strong>${tResult.cohensD.toFixed(2)}</strong>로, <strong>${effectLabel}</strong>에 해당합니다.</p>
@@ -1574,7 +1629,7 @@ function runAnovaAnalysis() {
   // 1. 가정 점검
   const norms = grpNames.map(name => {
     const chk = StatsHelper.checkNormality(groupDataMap[name]);
-    chk.reason = `'${name}' 집단 정규성: ` + chk.reason;
+    chk.reason = `'${getValLabel(groupVar, name)}' 집단 정규성: ` + chk.reason;
     return chk;
   });
 
@@ -1596,7 +1651,7 @@ function runAnovaAnalysis() {
 
   let grpMeansHtml = "";
   anova.groups.forEach(g => {
-    grpMeansHtml += `<tr><td>'${g.name}' 평균 (Std)</td><td>${g.mean.toFixed(2)} (${g.stdDev.toFixed(2)})</td><td>n = ${g.n}</td></tr>`;
+    grpMeansHtml += `<tr><td>'${getValLabel(groupVar, g.name)}' 평균 (Std)</td><td>${g.mean.toFixed(2)} (${g.stdDev.toFixed(2)})</td><td>n = ${g.n}</td></tr>`;
   });
 
   table.innerHTML = `
@@ -1618,9 +1673,14 @@ function runAnovaAnalysis() {
   
   anova.postHoc.forEach(ph => {
     const isPhSig = ph.pValue < 0.05;
+    const parts = ph.comparison.split(" vs ");
+    let displayComparison = ph.comparison;
+    if (parts.length === 2) {
+      displayComparison = `${getValLabel(groupVar, parts[0])} vs ${getValLabel(groupVar, parts[1])}`;
+    }
     posthocHtml += `
       <tr class="${isPhSig ? 'highlight-row' : ''}">
-        <td><strong>${ph.comparison}</strong></td>
+        <td><strong>${displayComparison}</strong></td>
         <td>${ph.diff.toFixed(3)}</td>
         <td>${ph.qValue.toFixed(3)}</td>
         <td>${ph.pValue.toFixed(4)}</td>
@@ -1638,7 +1698,13 @@ function runAnovaAnalysis() {
   if (anova.etaSquared >= 0.14) effectLabel = "매우 큰 수준 (집단 간 성향 차이가 매우 강함)";
   else if (anova.etaSquared >= 0.06) effectLabel = "중간 수준";
 
-  let sigGroups = anova.postHoc.filter(p => p.pValue < 0.05).map(p => `'${p.comparison}'`);
+  let sigGroups = anova.postHoc.filter(p => p.pValue < 0.05).map(p => {
+    const parts = p.comparison.split(" vs ");
+    if (parts.length === 2) {
+      return `'${getValLabel(groupVar, parts[0])} vs ${getValLabel(groupVar, parts[1])}'`;
+    }
+    return `'${p.comparison}'`;
+  });
 
   interpretation.innerHTML = `
     <p>집단 변수 <strong>'${groupVar}'</strong>에 의해 나누어진 세 개 이상의 집단 간에 <strong>'${varName}'</strong>의 평균값 차이가 있는지 일원분산분석(One-way ANOVA)을 수행했습니다.</p>
