@@ -923,6 +923,7 @@ a {
 }
 [data-theme="light"] .sidebar-data-summary .status-active .info-row span {
   color: hsl(220, 10%, 35%) !important;
+  opacity: 0.8;
 }
 [data-theme="light"] .sidebar-data-summary .status-active .info-row strong {
   color: var(--primary) !important;
