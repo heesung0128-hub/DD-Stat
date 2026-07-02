@@ -140,6 +140,11 @@
                   <i class="fa-solid fa-medal"></i> 수학 점수 차이 (집단 간 t-검정/ANOVA)
                 </button>
               </div>
+              <div class="template-download-section mt-4" style="border-top: 1px dashed var(--border-glass); padding-top: 12px;">
+                <button class="btn btn-secondary btn-sm w-100" id="btn-download-template">
+                  <i class="fa-solid fa-file-excel"></i> 데이터 입력용 엑셀 양식 다운로드
+                </button>
+              </div>
             </div>
           </div>
           
@@ -246,8 +251,12 @@
                 <select id="desc-chart-type" class="form-control mt-1">
                   <option value="auto">자동 추천 그래프</option>
                   <option value="histogram">히스토그램 (연속형 데이터 분포)</option>
+                  <option value="freq-polygon">도수분포다각형 (고교 교육과정 분포선)</option>
                   <option value="boxplot">상자그림 (Box Plot, 중앙값과 사분위수)</option>
-                  <option value="bar">막대 그래프 (범주형 빈도 비교)</option>
+                  <option value="bar">단일 막대 그래프 (범주형 빈도 비교)</option>
+                  <option value="grouped-bar">그룹형 막대 그래프 (이변량 범주 비교)</option>
+                  <option value="stacked-bar">누적 막대 그래프 (이변량 범주 비율)</option>
+                  <option value="line">꺾은선 그래프 (순서형/추세 시각화)</option>
                   <option value="pie">원 그래프 (Pie, 범주 비율)</option>
                   <option value="scatter">산점도 (Scatter, 두 연속형 변수의 분포)</option>
                   <option value="stemleaf">줄기-잎 그림 (수치 시각화)</option>
