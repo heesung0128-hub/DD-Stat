@@ -43,6 +43,7 @@ const AppState = {
   headers: [],     // 열 이름 배열: ['Sleep_Hours', 'Academic_Score']
   colTypes: {},    // 열 유형: { 'Sleep_Hours': 'continuous', 'Academic_Score': 'continuous' }
   valueLabels: {}, // 값 레이블 매핑: { '성별': { '1': '남자', '2': '여자' } }
+  missingRules: {}, // 각 열별 결측값 규칙 지정: { '수면_시간': '99, 999' }
   chartInstance: null, // Chart.js 인스턴스
   selectedRows: new Set(), // 삭제용 선택 행 번호
   hypothesis: "",  // 연구 가설
@@ -76,12 +77,67 @@ function parseValueLabelsString(col, str) {
   AppState.valueLabels[col] = map;
 }
 
+// --- 값 레이블 치환 헬퍼 ---
 function getValLabel(col, val) {
   const strVal = String(val).trim();
   if (AppState.valueLabels[col] && AppState.valueLabels[col][strVal] !== undefined) {
     return AppState.valueLabels[col][strVal];
   }
   return val;
+}
+
+// --- 결측값 판별 헬퍼 함수 ---
+function isMissingValue(col, val) {
+  if (val === "" || val === null || val === undefined) return true;
+  const ruleStr = AppState.missingRules[col];
+  if (!ruleStr) return false;
+  
+  const numVal = parseFloat(val);
+  const cleanStr = ruleStr.trim();
+  if (!cleanStr) return false;
+
+  const parts = cleanStr.split(",");
+  for (let part of parts) {
+    part = part.trim();
+    if (part.includes("-") && !part.startsWith("-")) {
+      const rangeParts = part.split("-");
+      if (rangeParts.length === 2) {
+        const min = parseFloat(rangeParts[0]);
+        const max = parseFloat(rangeParts[1]);
+        if (!isNaN(min) && !isNaN(max) && !isNaN(numVal)) {
+          if (numVal >= min && numVal <= max) return true;
+        }
+      }
+    } else {
+      const targetNum = parseFloat(part);
+      if (!isNaN(targetNum) && !isNaN(numVal) && targetNum === numVal) {
+        return true;
+      }
+      if (String(val).trim() === part) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// --- 엑셀 입력 양식 다운로드 함수 ---
+function downloadExcelTemplate() {
+  if (typeof XLSX === 'undefined') {
+    alert("SheetJS 라이브러리가 로드되지 않아 템플릿을 생성할 수 없습니다.");
+    return;
+  }
+  const ws_data = [
+    ["학생_이름", "수면_시간(시간)", "학업_성적(점수)", "성별", "선호_음식"], // 헤더 (상단 변수 제목)
+    ["홍길동", 7.5, 85, 1, "한식"], // 예시 행 1
+    ["이영희", 6.0, 72, 2, "일식"], // 예시 행 2
+    ["김철수", 5.5, 65, 1, "양식"]  // 예시 행 3
+  ];
+  
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(ws_data);
+  XLSX.utils.book_append_sheet(wb, ws, "데이터_입력_양식");
+  XLSX.writeFile(wb, "DD_Stat_Template.xlsx");
 }
 
 // --- DOM 로드 시 초기화 ---
@@ -95,6 +151,12 @@ document.addEventListener("DOMContentLoaded", () => {
   initInferLayout();
   initProbCalculator();
   initWizard();
+
+  // 템플릿 다운로드 버튼 바인딩
+  const downloadBtn = document.getElementById("btn-download-template");
+  if (downloadBtn) {
+    downloadBtn.addEventListener("click", downloadExcelTemplate);
+  }
 });
 
 // --- 테마 설정 (다크/라이트 모드) ---
@@ -135,7 +197,6 @@ function updateThemeUI() {
 }
 
 function triggerChartRefresh() {
-  // 현재 활성화된 탭에 맞춰 그래프 다시 그리기
   const activeTab = document.querySelector(".sidebar-nav li.active").getAttribute("data-tab");
   if (activeTab === "tab-desc") {
     document.getElementById("btn-run-desc").click();
@@ -162,10 +223,8 @@ function initTabs() {
       item.classList.add("active");
       document.getElementById(tabId).classList.add("active");
 
-      // 헤더 제목/설명 변경
       updateHeaderInfo(tabId);
 
-      // 분석 선택/변수 드롭다운 최신화
       if (tabId === "tab-desc") {
         populateDescSelects();
       } else if (tabId === "tab-infer") {
@@ -285,26 +344,36 @@ function handleUploadedFile(file) {
 }
 
 function processRawData(parsedRows, fields) {
-  AppState.valueLabels = {}; // 값 레이블 초기화
-  AppState.headers = fields;
-  AppState.data = parsedRows.map(row => {
+  let cleanFields = fields.filter(f => f && !String(f).startsWith("__EMPTY"));
+
+  AppState.valueLabels = {};
+  AppState.missingRules = {};
+  AppState.headers = cleanFields;
+  
+  const tempRows = [];
+  parsedRows.forEach(row => {
     const cleanRow = {};
-    fields.forEach(f => {
-      // 숫자 변환 시도, 비었으면 공백
+    let hasData = false;
+    cleanFields.forEach(f => {
       const val = row[f];
       if (val === "" || val === null || val === undefined) {
         cleanRow[f] = "";
       } else {
         const num = parseFloat(val);
         cleanRow[f] = isNaN(num) ? String(val).trim() : num;
+        if (cleanRow[f] !== "") {
+          hasData = true;
+        }
       }
     });
-    return cleanRow;
+    if (hasData) {
+      tempRows.push(cleanRow);
+    }
   });
+  AppState.data = tempRows;
 
-  // 열 유형 초기 자동 판정 (모두 숫자인 경우 continuous, 문자열이 섞였으면 categorical)
   AppState.colTypes = {};
-  fields.forEach(f => {
+  cleanFields.forEach(f => {
     let numericCount = 0;
     let totalCount = 0;
     
@@ -316,9 +385,9 @@ function processRawData(parsedRows, fields) {
     });
 
     if (totalCount > 0 && numericCount / totalCount > 0.8) {
-      AppState.colTypes[f] = "continuous"; // 연속형
+      AppState.colTypes[f] = "continuous";
     } else {
-      AppState.colTypes[f] = "categorical"; // 범주형
+      AppState.colTypes[f] = "categorical";
     }
   });
 
@@ -342,7 +411,6 @@ function showWorkspace(show) {
 
 // --- 샘플 데이터 탑재 ---
 function initSampleData() {
-  // 1) 학업 성취도 & 수면 시간 (Sleep_Hours, Academic_Score)
   document.getElementById("btn-sample-study").addEventListener("click", () => {
     const sleep = [7.5, 6.0, 5.5, 8.0, 4.5, 7.0, 6.5, 5.0, 8.5, 6.0, 7.0, 5.5, 6.5, 7.5, 5.0, 6.0, 8.0, 4.0, 7.0, 6.5, 9.0, 5.8, 6.8, 7.2, 5.2, 6.2, 8.2, 4.8, 7.8, 6.4];
     const score = [85, 72, 65, 90, 50, 80, 78, 60, 92, 70, 82, 68, 75, 88, 62, 74, 86, 45, 81, 76, 95, 71, 80, 84, 61, 73, 89, 58, 87, 72];
@@ -354,7 +422,6 @@ function initSampleData() {
     processRawData(rows, ["수면_시간(시간)", "학업_성적(점수)"]);
   });
 
-  // 2) 식습관 선호도 (Gender, Preferred_Food)
   document.getElementById("btn-sample-diet").addEventListener("click", () => {
     const genders = ["남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여"];
     const foods = ["한식", "일식", "양식", "한식", "양식", "일식", "한식", "일식", "양식", "한식", "한식", "한식", "양식", "일식", "양식", "한식", "한식", "일식", "양식", "일식", "한식", "한식", "양식", "일식", "양식", "일식", "한식", "한식", "양식", "일식"];
@@ -366,7 +433,6 @@ function initSampleData() {
     processRawData(rows, ["성별", "선호_음식"]);
   });
 
-  // 3) 수학 점수 차이 (Group_Method, Math_Score)
   document.getElementById("btn-sample-score").addEventListener("click", () => {
     const groups = ["강의식", "강의식", "강의식", "강의식", "강의식", "토론식", "토론식", "토론식", "토론식", "토론식", "자기주도", "자기주도", "자기주도", "자기주도", "자기주도"];
     const math = [75, 80, 78, 85, 72, 85, 90, 88, 92, 86, 60, 65, 58, 62, 65];
@@ -378,7 +444,6 @@ function initSampleData() {
     processRawData(rows, ["학습_방법", "수학_성적"]);
   });
 
-  // 데이터 초기화 버튼
   document.getElementById("btn-reset-data").addEventListener("click", () => {
     if (confirm("정말로 모든 데이터를 초기화하시겠습니까?")) {
       AppState.data = [];
@@ -387,7 +452,6 @@ function initSampleData() {
       AppState.selectedRows.clear();
       showWorkspace(false);
       
-      // 요약 상태 갱신
       document.getElementById("summary-rows").textContent = "0";
       document.getElementById("summary-vars").textContent = "0";
       document.getElementById("summary-missing").textContent = "0";
@@ -402,7 +466,6 @@ function updateDataWorkspace() {
   const summaryMissing = document.getElementById("summary-missing");
   const infoBadge = document.getElementById("data-info-badge");
 
-  // 기초 정보 계산
   const numRows = AppState.data.length;
   const numCols = AppState.headers.length;
   let missingCount = 0;
@@ -420,7 +483,6 @@ function updateDataWorkspace() {
   summaryMissing.textContent = missingCount;
   infoBadge.textContent = `총 ${numRows}행, ${numCols}열`;
 
-  // 1. 변수 속성 지정 카드 채우기
   const cardsContainer = document.getElementById("variable-cards-container");
   cardsContainer.innerHTML = "";
   
@@ -441,7 +503,6 @@ function updateDataWorkspace() {
     `;
     select.addEventListener("change", (e) => {
       AppState.colTypes[h] = e.target.value;
-      // 데이터를 알맞은 타입으로 컨버전 시도
       AppState.data.forEach(row => {
         if (row[h] !== "") {
           if (e.target.value === "continuous" || e.target.value === "likert") {
@@ -455,7 +516,6 @@ function updateDataWorkspace() {
     });
     card.appendChild(select);
 
-    // 값 레이블 설정 입력 영역 추가
     const labelInputGroup = document.createElement("div");
     labelInputGroup.className = "mt-2";
     
@@ -479,20 +539,78 @@ function updateDataWorkspace() {
     labelInputGroup.appendChild(labelInput);
     card.appendChild(labelInputGroup);
 
+    const missingInputGroup = document.createElement("div");
+    missingInputGroup.className = "mt-2";
+    
+    const missingTitle = document.createElement("label");
+    missingTitle.style.fontSize = "11px";
+    missingTitle.style.display = "block";
+    missingTitle.style.marginBottom = "2px";
+    missingTitle.textContent = "결측값 지정 (예: 99, 999 또는 90-100)";
+    
+    const missingInput = document.createElement("input");
+    missingInput.type = "text";
+    missingInput.className = "form-control missing-input mt-1";
+    missingInput.placeholder = "예: 99, 999 또는 90-100";
+    missingInput.value = AppState.missingRules[h] || "";
+    
+    missingInput.addEventListener("change", (e) => {
+      AppState.missingRules[h] = e.target.value;
+    });
+
+    missingInputGroup.appendChild(missingTitle);
+    missingInputGroup.appendChild(missingInput);
+    card.appendChild(missingInputGroup);
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "btn btn-sm btn-danger mt-2 w-100";
+    deleteBtn.style.padding = "4px 8px";
+    deleteBtn.style.fontSize = "11px";
+    deleteBtn.innerHTML = `<i class="fa-solid fa-trash-can"></i> 이 열 삭제`;
+    deleteBtn.addEventListener("click", () => {
+      deleteColumn(h);
+    });
+    card.appendChild(deleteBtn);
+
     cardsContainer.appendChild(card);
   });
 
-  // 2. 실제 데이터 테이블 렌더링
+  resetAnalysisVariables();
+}
+
+function deleteColumn(colName) {
+  if (AppState.headers.length <= 1) {
+    alert("최소 1개 이상의 열이 존재해야 합니다.");
+    return;
+  }
+  if (!confirm(`'${colName}' 열을 정말 삭제하시겠습니까? 데이터와 속성이 모두 삭제됩니다.`)) {
+    return;
+  }
+  
+  AppState.headers = AppState.headers.filter(h => h !== colName);
+  
+  AppState.data.forEach(row => {
+    delete row[colName];
+  });
+  
+  delete AppState.colTypes[colName];
+  delete AppState.valueLabels[colName];
+  if (AppState.missingRules) {
+    delete AppState.missingRules[colName];
+  }
+  
+  updateDataWorkspace();
+}
+
+function resetAnalysisVariables() {
   const headerRow = document.getElementById("table-header-row");
   const bodyRows = document.getElementById("table-body-rows");
 
-  // 헤더 생성
   headerRow.innerHTML = `<th style="width: 40px;"><input type="checkbox" id="check-all-rows"></th>`;
   AppState.headers.forEach(h => {
     headerRow.innerHTML += `<th>${h}</th>`;
   });
 
-  // 체크박스 마스터 이벤트
   const checkAll = document.getElementById("check-all-rows");
   checkAll.addEventListener("change", (e) => {
     const isChecked = e.target.checked;
@@ -505,7 +623,6 @@ function updateDataWorkspace() {
     });
   });
 
-  // 바디 행들 생성
   bodyRows.innerHTML = "";
   AppState.data.forEach((row, rIdx) => {
     const tr = document.createElement("tr");
@@ -548,7 +665,6 @@ function updateDataWorkspace() {
 }
 
 function initTableControls() {
-  // 행 추가
   document.getElementById("btn-add-row").addEventListener("click", () => {
     const newRow = {};
     AppState.headers.forEach(h => {
@@ -558,7 +674,6 @@ function initTableControls() {
     updateDataWorkspace();
   });
 
-  // 열 추가
   document.getElementById("btn-add-col").addEventListener("click", () => {
     const colName = prompt("새로운 열(변수) 이름을 입력해 주세요:", `변수_${AppState.headers.length + 1}`);
     if (colName) {
@@ -576,7 +691,6 @@ function initTableControls() {
     }
   });
 
-  // 선택 삭제
   document.getElementById("btn-delete-selected").addEventListener("click", () => {
     if (AppState.selectedRows.size === 0) {
       alert("삭제할 행을 체크해 주세요.");
@@ -584,7 +698,6 @@ function initTableControls() {
     }
 
     if (confirm(`선택한 ${AppState.selectedRows.size}개의 행을 삭제하시겠습니까?`)) {
-      // 인덱스가 뒤바뀌지 않게 역순으로 제거
       const sortedIdxs = Array.from(AppState.selectedRows).sort((a, b) => b - a);
       sortedIdxs.forEach(idx => {
         AppState.data.splice(idx, 1);
@@ -597,7 +710,6 @@ function initTableControls() {
 
 // --- 결측값, 역코딩, 이상치 탐색 도구 ---
 function initPreprocessTools() {
-  // 1) 결측치 적용
   document.getElementById("btn-apply-missing").addEventListener("click", () => {
     const method = document.getElementById("select-missing-handler").value;
     if (AppState.data.length === 0) return;
@@ -634,14 +746,12 @@ function initPreprocessTools() {
     alert("결측치 전처리가 완료되었습니다.");
   });
 
-  // 역코딩 선택 목록 로드 헬퍼
   document.getElementById("select-recode-col").addEventListener("focus", (e) => {
     e.target.innerHTML = `<option value="">변수 선택</option>` + AppState.headers
       .filter(h => AppState.colTypes[h] === "continuous" || AppState.colTypes[h] === "likert")
       .map(h => `<option value="${h}">${h}</option>`).join("");
   });
 
-  // 2) 역코딩 적용
   document.getElementById("btn-apply-recode").addEventListener("click", () => {
     const colName = document.getElementById("select-recode-col").value;
     const scale = parseInt(document.getElementById("select-recode-scale").value);
@@ -664,7 +774,6 @@ function initPreprocessTools() {
     alert(`변수 '${colName}'의 척도(${scale}점 기준) 역코딩이 ${count}개 데이터에 적용되었습니다.`);
   });
 
-  // 3) 이상치 탐색
   const outlierModal = document.getElementById("outlier-modal");
   const closeOutlier = document.getElementById("btn-close-outlier");
   const confirmOutlier = document.getElementById("btn-confirm-outlier");
@@ -672,11 +781,10 @@ function initPreprocessTools() {
   document.getElementById("btn-detect-outliers").addEventListener("click", () => {
     if (AppState.data.length === 0) return;
 
-    // 테이블의 모든 이상치 마킹 초기화
     AppState.headers.forEach(h => {
       AppState.data.forEach((r, idx) => {
         const tr = document.getElementById(`data-tr-${idx}`);
-        if (tr) tr.classList.remove("danger");
+        if (tr) tr.style.backgroundColor = "";
       });
     });
 
@@ -685,7 +793,6 @@ function initPreprocessTools() {
       if (AppState.colTypes[h] === "continuous") {
         const desc = StatsHelper.calculateDescriptive(AppState.data.map(r => r[h]));
         if (desc && desc.outliers.length > 0) {
-          // 테이블 행 마킹 및 모달 기록
           AppState.data.forEach((row, idx) => {
             const v = parseFloat(row[h]);
             if (!isNaN(v) && (v < desc.lowerBound || v > desc.upperBound)) {
@@ -734,7 +841,6 @@ function initPreprocessTools() {
   closeOutlier.addEventListener("click", () => outlierModal.classList.add("hidden"));
   confirmOutlier.addEventListener("click", () => {
     outlierModal.classList.add("hidden");
-    // 하이라이팅 초기화
     AppState.data.forEach((r, idx) => {
       const tr = document.getElementById(`data-tr-${idx}`);
       if (tr) tr.style.backgroundColor = "";
@@ -758,7 +864,6 @@ function populateDescSelects() {
     }
   });
 
-  // 변수 선택 이벤트 바인딩
   document.getElementById("btn-run-desc").onclick = runDescriptiveAnalysis;
 }
 
@@ -772,7 +877,14 @@ function runDescriptiveAnalysis() {
     return;
   }
 
-  const data1 = AppState.data.map(r => r[var1]).filter(v => v !== "");
+  let data1, data2;
+  if (!var2) {
+    data1 = AppState.data.map(r => r[var1]).filter(v => !isMissingValue(var1, v));
+  } else {
+    const pairData = AppState.data.filter(r => !isMissingValue(var1, r[var1]) && !isMissingValue(var2, r[var2]));
+    data1 = pairData.map(r => r[var1]);
+    data2 = pairData.map(r => r[var2]);
+  }
   const type1 = AppState.colTypes[var1];
 
   const resultsEmpty = document.getElementById("desc-results-empty");
@@ -781,11 +893,9 @@ function runDescriptiveAnalysis() {
   resultsEmpty.classList.add("hidden");
   resultsContent.classList.remove("hidden");
 
-  // 1. 통계 요약표 그리기
   const descTable = document.getElementById("desc-table");
   
   if (!var2) {
-    // 단일 변수 기술통계
     if (type1 === "continuous") {
       const stats = StatsHelper.calculateDescriptive(data1);
       if (!stats) return;
@@ -807,7 +917,6 @@ function runDescriptiveAnalysis() {
       if (chartType === "auto") chartType = "histogram";
       
     } else {
-      // 범주형 기술통계
       const freqs = StatsHelper.calculateFrequency(data1);
       let html = `<tr><th>범주 값</th><th>빈도 (Count)</th><th>비율 (Percentage)</th></tr>`;
       freqs.list.forEach(item => {
@@ -820,12 +929,9 @@ function runDescriptiveAnalysis() {
       if (chartType === "auto") chartType = "bar";
     }
     
-    // 해석 완성하기
     renderDescInterpretation(var1, null);
     
   } else {
-    // 두 변수의 교차표 (Cross Tab)
-    const data2 = AppState.data.map(r => r[var2]).filter(v => v !== "");
     const cross = StatsHelper.calculateCrossTab(data1, data2);
     
     let html = `<tr><th>${var1} \\ ${var2}</th>`;
@@ -840,7 +946,6 @@ function runDescriptiveAnalysis() {
       html += `<td><strong>${cross.rowTotals[r]}명</strong></td></tr>`;
     });
     
-    // 하단 합계행
     html += `<tr class="highlight-row"><td><strong>합계</strong></td>`;
     cross.cols.forEach(c => {
       html += `<td><strong>${cross.colTotals[c]}명</strong></td>`;
@@ -852,7 +957,6 @@ function runDescriptiveAnalysis() {
     renderDescInterpretation(var1, var2);
   }
 
-  // 2. 그래프 그리기
   drawDescriptiveChart(var1, var2, chartType);
 }
 
@@ -860,7 +964,6 @@ function drawDescriptiveChart(var1, var2, chartType) {
   const ctx = document.getElementById("desc-chart");
   const stemLeaf = document.getElementById("stem-leaf-display");
   
-  // 이전 차트 인스턴스 소멸
   if (AppState.chartInstance) {
     AppState.chartInstance.destroy();
     AppState.chartInstance = null;
@@ -869,12 +972,18 @@ function drawDescriptiveChart(var1, var2, chartType) {
   ctx.classList.remove("hidden");
   stemLeaf.classList.add("hidden");
 
-  const data1 = AppState.data.map(r => r[var1]).filter(v => v !== "");
+  let data1, data2;
+  if (!var2) {
+    data1 = AppState.data.map(r => r[var1]).filter(v => !isMissingValue(var1, v));
+  } else {
+    const pairData = AppState.data.filter(r => !isMissingValue(var1, r[var1]) && !isMissingValue(var2, r[var2]));
+    data1 = pairData.map(r => r[var1]);
+    data2 = pairData.map(r => r[var2]);
+  }
   const isDark = AppState.theme === "dark";
   const gridColor = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)";
   const textColor = isDark ? "#c8cdd4" : "#2d3748";
 
-  // 차트 테마 컬러
   const primaryColor = "rgba(114, 46, 209, 0.7)";
   const secondaryColor = "rgba(22, 119, 255, 0.7)";
   const hoverColor = "rgba(114, 46, 209, 0.9)";
@@ -888,7 +997,6 @@ function drawDescriptiveChart(var1, var2, chartType) {
   ];
 
   if (chartType === "histogram") {
-    // 히스토그램 연산 (Sturges Rule로 bin 수 결정)
     const stats = StatsHelper.calculateDescriptive(data1);
     if (!stats) return;
 
@@ -905,7 +1013,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
 
     data1.forEach(v => {
       let idx = Math.floor((v - stats.min) / binWidth);
-      if (idx >= numBins) idx = numBins - 1; // max값 보정
+      if (idx >= numBins) idx = numBins - 1;
       if (idx >= 0) bins[idx]++;
     });
 
@@ -937,19 +1045,16 @@ function drawDescriptiveChart(var1, var2, chartType) {
     });
 
   } else if (chartType === "boxplot") {
-    // Chart.js에서 boxplot은 Canvas 드로잉으로 우회 (신뢰성 100%)
     ctx.classList.add("hidden");
     stemLeaf.classList.remove("hidden");
     
     const stats = StatsHelper.calculateDescriptive(data1);
     if (!stats) return;
 
-    // Canvas 생성해서 stemLeaf 박스 안에 박스플롯 직접 렌더링
     stemLeaf.innerHTML = `<div style="text-align:center;font-weight:600;margin-bottom:8px;">${var1}의 상자그림 (Box Plot)</div><canvas id="custom-box-canvas" width="450" height="180"></canvas>`;
     const cvs = document.getElementById("custom-box-canvas");
     const c = cvs.getContext("2d");
 
-    // 축 매핑 연산
     const padding = 40;
     const w = cvs.width - padding * 2;
     const h = cvs.height;
@@ -958,7 +1063,6 @@ function drawDescriptiveChart(var1, var2, chartType) {
 
     c.clearRect(0,0,cvs.width,cvs.height);
 
-    // 축 그리기
     c.strokeStyle = isDark ? "#555" : "#ccc";
     c.lineWidth = 1;
     c.beginPath();
@@ -966,7 +1070,6 @@ function drawDescriptiveChart(var1, var2, chartType) {
     c.lineTo(cvs.width - padding, h - 40);
     c.stroke();
 
-    // 눈금 눈금
     const ticks = [stats.min, stats.q1, stats.median, stats.q3, stats.max];
     ticks.forEach(t => {
       const x = scale(t);
@@ -988,27 +1091,23 @@ function drawDescriptiveChart(var1, var2, chartType) {
     const minX = scale(stats.min);
     const maxX = scale(stats.max);
 
-    // 수염(Whisker) 그리기
     c.beginPath();
     c.moveTo(minX, boxY + boxH/2);
     c.lineTo(q1X, boxY + boxH/2);
     c.moveTo(q3X, boxY + boxH/2);
     c.lineTo(maxX, boxY + boxH/2);
-    // 양 끝 가로선
     c.moveTo(minX, boxY + 15);
     c.lineTo(minX, boxY + boxH - 15);
     c.moveTo(maxX, boxY + 15);
     c.lineTo(maxX, boxY + boxH - 15);
     c.stroke();
 
-    // 상자 그리기
     c.fillStyle = isDark ? "rgba(114, 46, 209, 0.4)" : "rgba(114, 46, 209, 0.15)";
     c.fillRect(q1X, boxY, q3X - q1X, boxH);
     c.strokeStyle = "var(--primary)";
     c.lineWidth = 2;
     c.strokeRect(q1X, boxY, q3X - q1X, boxH);
 
-    // 중앙값 선 그리기
     c.strokeStyle = "var(--danger)";
     c.lineWidth = 3;
     c.beginPath();
@@ -1016,7 +1115,6 @@ function drawDescriptiveChart(var1, var2, chartType) {
     c.lineTo(medX, boxY + boxH);
     c.stroke();
 
-    // 이상치 점 그리기
     stats.outliers.forEach(outVal => {
       const outX = scale(outVal);
       c.fillStyle = "var(--danger)";
@@ -1025,8 +1123,162 @@ function drawDescriptiveChart(var1, var2, chartType) {
       c.fill();
     });
 
+  } else if (chartType === "freq-polygon") {
+    const stats = StatsHelper.calculateDescriptive(data1);
+    if (!stats) return;
+
+    const numBins = Math.ceil(Math.log2(stats.n) + 1);
+    const binWidth = stats.range / numBins;
+    const bins = Array(numBins).fill(0);
+    
+    data1.forEach(v => {
+      let idx = Math.floor((v - stats.min) / binWidth);
+      if (idx >= numBins) idx = numBins - 1;
+      if (idx >= 0) bins[idx]++;
+    });
+
+    const polygonLabels = [];
+    const polygonData = [];
+    
+    const startLeft = stats.min - binWidth;
+    const endLeft = stats.min;
+    polygonLabels.push(`${startLeft.toFixed(1)}~${endLeft.toFixed(1)}`);
+    polygonData.push(0);
+    
+    for (let i = 0; i < numBins; i++) {
+      const start = stats.min + i * binWidth;
+      const end = start + binWidth;
+      polygonLabels.push(`${start.toFixed(1)}~${end.toFixed(1)}`);
+      polygonData.push(bins[i]);
+    }
+    
+    const startRight = stats.min + numBins * binWidth;
+    const endRight = startRight + binWidth;
+    polygonLabels.push(`${startRight.toFixed(1)}~${endRight.toFixed(1)}`);
+    polygonData.push(0);
+
+    AppState.chartInstance = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: polygonLabels,
+        datasets: [{
+          label: "도수 (빈도)",
+          data: polygonData,
+          borderColor: "var(--primary)",
+          backgroundColor: "rgba(114, 46, 209, 0.1)",
+          fill: true,
+          borderWidth: 2,
+          pointRadius: 4,
+          pointBackgroundColor: "var(--primary)",
+          tension: 0.1
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          title: { display: true, text: `${var1}의 도수분포다각형`, color: textColor }
+        },
+        scales: {
+          x: { title: { display: true, text: `계급 (${var1})`, color: textColor }, grid: { color: gridColor }, ticks: { color: textColor } },
+          y: { title: { display: true, text: "도수(명)", color: textColor }, grid: { color: gridColor }, ticks: { color: textColor, stepSize: 1 }, beginAtZero: true }
+        }
+      }
+    });
+
+  } else if (chartType === "grouped-bar" || chartType === "stacked-bar") {
+    if (!var2) {
+      alert("그룹형/누적 막대 그래프를 그리려면 두 번째 변수(교차비교 변수)를 선택해야 합니다.");
+      return;
+    }
+
+    const cross = StatsHelper.calculateCrossTab(data1, data2);
+    
+    const chartPalette = [
+      "rgba(114, 46, 209, 0.7)",
+      "rgba(22, 119, 255, 0.7)",
+      "rgba(56, 158, 13, 0.7)",
+      "rgba(212, 107, 8, 0.7)",
+      "rgba(207, 19, 34, 0.7)",
+      "rgba(19, 194, 194, 0.7)"
+    ];
+
+    const datasets = cross.cols.map((colVal, colIdx) => {
+      const datasetData = cross.rows.map(rowVal => cross.table[rowVal][colVal] || 0);
+      return {
+        label: getValLabel(var2, colVal),
+        data: datasetData,
+        backgroundColor: chartPalette[colIdx % chartPalette.length],
+        borderWidth: 0
+      };
+    });
+
+    const xLabels = cross.rows.map(r => getValLabel(var1, r));
+
+    AppState.chartInstance = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: xLabels,
+        datasets: datasets
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: true, position: "top", labels: { color: textColor } },
+          title: { display: true, text: `${var1}별 ${var2}의 ${chartType === "stacked-bar" ? "누적" : "그룹형"} 막대그래프`, color: textColor }
+        },
+        scales: {
+          x: { 
+            title: { display: true, text: var1, color: textColor },
+            grid: { display: false }, 
+            ticks: { color: textColor },
+            stacked: chartType === "stacked-bar"
+          },
+          y: { 
+            title: { display: true, text: "빈도(명)", color: textColor },
+            grid: { color: gridColor }, 
+            ticks: { color: textColor, stepSize: 1 }, 
+            beginAtZero: true,
+            stacked: chartType === "stacked-bar"
+          }
+        }
+      }
+    });
+
+  } else if (chartType === "line") {
+    const freqs = StatsHelper.calculateFrequency(data1);
+    const labels = freqs.list.map(l => getValLabel(var1, l.value)).reverse();
+    const values = freqs.list.map(l => l.count).reverse();
+
+    AppState.chartInstance = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: [{
+          label: "빈도(명)",
+          data: values,
+          borderColor: "var(--primary)",
+          backgroundColor: "rgba(114, 46, 209, 0.1)",
+          borderWidth: 2,
+          pointRadius: 4,
+          pointBackgroundColor: "var(--primary)",
+          tension: 0.1
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          title: { display: true, text: `${var1}의 빈도 꺾은선그래프`, color: textColor }
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { color: textColor } },
+          y: { grid: { color: gridColor }, ticks: { color: textColor, stepSize: 1 }, beginAtZero: true }
+        }
+      }
+    });
+
   } else if (chartType === "bar") {
-    // 빈도 막대 그래프
     const freqs = StatsHelper.calculateFrequency(data1);
     const labels = freqs.list.map(l => getValLabel(var1, l.value));
     const values = freqs.list.map(l => l.count);
@@ -1056,7 +1308,6 @@ function drawDescriptiveChart(var1, var2, chartType) {
     });
 
   } else if (chartType === "pie") {
-    // 비율 파이 차트
     const freqs = StatsHelper.calculateFrequency(data1);
     const labels = freqs.list.map(l => getValLabel(var1, l.value));
     const values = freqs.list.map(l => l.count);
@@ -1082,7 +1333,6 @@ function drawDescriptiveChart(var1, var2, chartType) {
     });
 
   } else if (chartType === "scatter") {
-    // 산점도 (두 수치형 변수 필요)
     if (!var2 || AppState.colTypes[var2] !== "continuous") {
       alert("산점도를 그리려면 두 번째 변수(교차비교 변수)도 수치형(연속형)이어야 합니다.");
       return;
@@ -1119,17 +1369,13 @@ function drawDescriptiveChart(var1, var2, chartType) {
     });
 
   } else if (chartType === "stemleaf") {
-    // 줄기-잎 그림 (Stem-and-Leaf Plot)
     ctx.classList.add("hidden");
     stemLeaf.classList.remove("hidden");
 
-    // 줄기-잎 알고리즘
-    // 연속형 수치를 소수점 첫째자리까지 버림하고, 십의자리(줄기)와 일의자리(잎)로 구분
     const numericVals = data1.map(v => parseFloat(v)).filter(v => !isNaN(v)).sort((a,b)=>a-b);
     const stemLeafMap = {};
     
     numericVals.forEach(v => {
-      // 10으로 나눈 목(줄기)과 나머지(잎)
       const rounded = Math.round(v);
       const stem = Math.floor(rounded / 10);
       const leaf = rounded % 10;
@@ -1147,7 +1393,6 @@ function drawDescriptiveChart(var1, var2, chartType) {
     stemLeaf.innerHTML = `<pre class="stem-leaf-box">${displayHtml}</pre>`;
   }
 
-  // 다운로드 이미지 바인딩
   document.getElementById("btn-download-desc-chart").onclick = () => {
     if (chartType === "boxplot" || chartType === "stemleaf") {
       alert("줄기-잎 그림 및 상자그림은 텍스트/커스텀 드로잉 기반이므로 차트 다운로드가 제한됩니다.");
@@ -1183,7 +1428,6 @@ function renderDescInterpretation(var1, var2) {
       `;
     }
   } else {
-    // 교차분석 해석
     box.innerHTML = `
       <p>두 범주형 변수인 <strong>'${var1}'</strong>와 <strong>'${var2}'</strong>를 연계하여 다차원 교차표를 도출한 결과입니다.</p>
       <p>각 집단 내에서 상대적인 빈도 패턴을 통해 두 변수 간에 어떠한 연관적 쏠림 경향이 있는지 직관적으로 살필 수 있습니다. 구체적인 연관 유의성을 검증하려면 <strong>3단계 추론통계 분석의 '카이제곱 독립성 검정'</strong>을 이용해 주십시오.</p>
@@ -1195,7 +1439,6 @@ function renderDescInterpretation(var1, var2) {
 function initInferLayout() {
   const methodSelect = document.getElementById("infer-method");
   
-  // 분석 방법 선택에 따라 변수 선택 폼 동적 갱신
   methodSelect.addEventListener("change", updateInferMethodOptions);
   
   document.getElementById("btn-run-infer").onclick = runInferentialAnalysis;
@@ -1243,9 +1486,6 @@ function updateInferMethodOptions() {
           <label for="infer-select-group">집단 구분 변수 (2개 범주):</label>
           <select id="infer-select-group" class="form-control mt-1">${catOptionsHTML}</select>
           <p class="input-tip mt-1">예: 성별에 따른 성적 비교 시, 수치 변수는 '성적', 집단 변수는 '성별'</p>
-        </div>
-        <div class="form-group mt-3">
-          <label><input type="checkbox" id="infer-chk-equalvar" checked> 등분산성 가정 적용</label>
         </div>
       `;
       break;
@@ -1333,7 +1573,6 @@ function runInferentialAnalysis() {
   const method = document.getElementById("infer-method").value;
   const hypothesis = document.getElementById("txt-hypothesis").value.trim();
 
-  // 가설 오용 방지 검증
   if (!hypothesis) {
     alert("오용 방지를 위해 통계 검정 실행 전 반드시 '연구 가설 적어보기'를 입력해 주십시오!");
     document.getElementById("txt-hypothesis").focus();
@@ -1347,14 +1586,11 @@ function runInferentialAnalysis() {
   resultsEmpty.classList.add("hidden");
   resultsContent.classList.remove("hidden");
 
-  // 가설 제목 패널 갱신
   document.getElementById("display-hypothesis").textContent = `"${hypothesis}"`;
 
-  // 기본 차트/사후검정 초기화 숨김
   document.getElementById("anova-posthoc-card").classList.add("hidden");
   document.getElementById("infer-chart-card").classList.add("hidden");
 
-  // 분석 실행 호출 분기
   switch(method) {
     case "ci":
       runCIAnalysis();
@@ -1389,15 +1625,12 @@ function runCIAnalysis() {
   const level = parseFloat(document.getElementById("infer-select-level").value);
   const data = AppState.data.map(r => r[varName]).filter(v => v !== "");
 
-  // 1. 가정 점검
   const normCheck = StatsHelper.checkNormality(data);
   renderAssumptionDashboard([normCheck]);
 
-  // 2. 연산
   const ci = StatsHelper.estimateConfidenceInterval(data, level);
   if (!ci) return;
 
-  // 3. 표 렌더링
   const table = document.getElementById("infer-result-table");
   table.innerHTML = `
     <tr><th>통계 지표</th><th>결과값</th><th>설명</th></tr>
@@ -1410,14 +1643,12 @@ function runCIAnalysis() {
     <tr class="highlight-row"><td><strong>${level*100}% 신뢰구간</strong></td><td>[${ci.lower.toFixed(3)} ~ ${ci.upper.toFixed(3)}]</td><td>모평균이 이 구간 내에 있을 확률이 ${level*100}%임</td></tr>
   `;
 
-  // 4. 한국어 해석
   const interpretation = document.getElementById("infer-korean-interpretation");
   interpretation.innerHTML = `
     <p>분석 대상 변수 <strong>'${varName}'</strong>의 모평균을 추정한 결과, 수집한 표본 ${ci.n}명을 기준으로 <strong>${level*100}% 신뢰구간은 [${ci.lower.toFixed(2)} ~ ${ci.upper.toFixed(2)}]</strong>입니다.</p>
     <p>이는 만약 동일한 조사를 무한히 반복했을 때, 도출된 구간들 중 <strong>${level*100}%</strong>가 실제 모집단의 평균을 포함하고 있음을 뜻합니다.</p>
   `;
 
-  // 5. 경고판
   const alertBox = document.getElementById("interpretation-limit-box");
   const alertTxt = document.getElementById("interpretation-limit-text");
   alertBox.style.backgroundColor = "var(--info-light)";
@@ -1430,13 +1661,15 @@ function runCIAnalysis() {
 function runIndependentTTestAnalysis() {
   const varName = document.getElementById("infer-select-var").value;
   const groupVar = document.getElementById("infer-select-group").value;
-  const assumeEqualVar = document.getElementById("infer-chk-equalvar").checked;
 
   const dataA = [];
   const dataB = [];
   const groupsSet = new Set();
   
   AppState.data.forEach(row => {
+    if (isMissingValue(varName, row[varName]) || isMissingValue(groupVar, row[groupVar])) {
+      return;
+    }
     const v = parseFloat(row[varName]);
     const grp = String(row[groupVar]).trim();
     if (!isNaN(v) && grp !== "") {
@@ -1450,7 +1683,6 @@ function runIndependentTTestAnalysis() {
     return;
   }
   
-  // 3개 집단 이상인 경우 t-검정 오용 경고 및 ANOVA 유도 (핵심 오용 방지 장치)
   if (grpArray.length > 2) {
     if (confirm(`집단 변수 '${groupVar}'에 3개 이상의 그룹(${grpArray.join(", ")})이 발견되었습니다. 세 집단 이상의 비교는 t-검정을 반복하는 대신 '일원분산분석(One-way ANOVA)'을 수행하는 것이 통계적으로 올바릅니다. 일원분산분석(ANOVA)으로 변경하여 실행할까요?`)) {
       document.getElementById("infer-method").value = "anova";
@@ -1466,6 +1698,9 @@ function runIndependentTTestAnalysis() {
   const gB = grpArray[1];
 
   AppState.data.forEach(row => {
+    if (isMissingValue(varName, row[varName]) || isMissingValue(groupVar, row[groupVar])) {
+      return;
+    }
     const v = parseFloat(row[varName]);
     const grp = String(row[groupVar]).trim();
     if (!isNaN(v)) {
@@ -1474,41 +1709,85 @@ function runIndependentTTestAnalysis() {
     }
   });
 
-  // 1. 가정 점검
   const normA = StatsHelper.checkNormality(dataA);
   const normB = StatsHelper.checkNormality(dataB);
   const homos = StatsHelper.checkHomoscedasticity([dataA, dataB]);
 
-  // 커스텀 리포트
   normA.reason = `'${getValLabel(groupVar, gA)}' 집단의 정규성: ` + normA.reason;
   normB.reason = `'${getValLabel(groupVar, gB)}' 집단의 정규성: ` + normB.reason;
   renderAssumptionDashboard([normA, normB, homos]);
 
-  // 2. 검정 연산
-  const tResult = StatsHelper.independentTTest(dataA, dataB, assumeEqualVar);
+  const tResult = StatsHelper.independentTTest(dataA, dataB);
   if (tResult.error) {
     alert(tResult.error);
     return;
   }
 
-  // 3. 결과 요약표
   const table = document.getElementById("infer-result-table");
-  const sig = tResult.pValue < 0.05 ? "유의함 (p < 0.05)" : "유의하지 않음 (p ≥ 0.05)";
+  
+  const passed = tResult.homoscedasticity.passed;
+  const suggestionText = passed
+    ? `<span style="color:var(--success);font-weight:bold;"><i class="fa-solid fa-circle-check"></i> [등분산 가정 만족]</span> 두 집단의 분산 비율이 ${tResult.homoscedasticity.ratio}배로 4배 이내에 있습니다. 아래 테이블에서 <strong>'등분산 가정됨'</strong> 행의 결과를 인용하십시오.`
+    : `<span style="color:var(--danger);font-weight:bold;"><i class="fa-solid fa-triangle-exclamation"></i> [등분산 가정 위배 의심]</span> 두 집단의 분산 비율이 ${tResult.homoscedasticity.ratio}배로 4배를 초과합니다. 아래 테이블에서 <strong>'등분산 가정되지 않음(Welch의 t-검정)'</strong> 행의 결과를 인용하십시오.`;
+
+  const eqSig = tResult.equalVariance.pValue < 0.05 ? "유의함 (p < 0.05)" : "유의하지 않음 (p ≥ 0.05)";
+  const uneqSig = tResult.unequalVariance.pValue < 0.05 ? "유의함 (p < 0.05)" : "유의하지 않음 (p ≥ 0.05)";
   
   table.innerHTML = `
-    <tr><th>통계 지표</th><th>결과값</th><th>설명</th></tr>
-    <tr><td><strong>검정 방식</strong></td><td>${tResult.method}</td><td>집단 간 분산 특성에 따른 수식 반영</td></tr>
-    <tr><td><strong>집단 A (${getValLabel(groupVar, gA)}) 평균 (N)</strong></td><td>${tResult.groupAInfo.mean.toFixed(3)} (n=${tResult.groupAInfo.n})</td><td>첫 번째 비교 집단의 통계량</td></tr>
-    <tr><td><strong>집단 B (${getValLabel(groupVar, gB)}) 평균 (N)</strong></td><td>${tResult.groupBInfo.mean.toFixed(3)} (n=${tResult.groupBInfo.n})</td><td>두 번째 비교 집단의 통계량</td></tr>
-    <tr><td><strong>t-통계량 (t)</strong></td><td>${tResult.tValue.toFixed(3)}</td><td>두 평균 차이가 표본오차의 몇 배인가를 보인 통계치</td></tr>
-    <tr><td><strong>자유도 (df)</strong></td><td>${tResult.df.toFixed(2)}</td><td>검정에 사용된 유효 표본 정보 단위 수</td></tr>
-    <tr class="highlight-row"><td><strong>유의확률 (p-value)</strong></td><td><strong>${tResult.pValue.toFixed(4)}</strong> (${sig})</td><td>실제 차이가 없는데 우연히 이런 결과가 나올 확률</td></tr>
-    <tr><td><strong>효과크기 (Cohen's d)</strong></td><td><strong>${tResult.cohensD.toFixed(3)}</strong></td><td>두 집단 차이의 실질적 크기 (0.2: 작음, 0.5: 중간, 0.8: 큼)</td></tr>
-    <tr><td><strong>두 평균의 차이 [95% CI]</strong></td><td>${tResult.diff.toFixed(3)} [${tResult.ciLower.toFixed(3)} ~ ${tResult.ciUpper.toFixed(3)}]</td><td>집단 A와 B 평균의 차이 범위</td></tr>
+    <tr><th colspan="3">1. 집단별 기초통계량</th></tr>
+    <tr><td><strong>집단 A (${getValLabel(groupVar, gA)})</strong></td><td colspan="2">${tResult.groupAInfo.mean.toFixed(3)} ± ${tResult.groupAInfo.stdDev.toFixed(3)} (n=${tResult.groupAInfo.n})</td></tr>
+    <tr><td><strong>집단 B (${getValLabel(groupVar, gB)})</strong></td><td colspan="2">${tResult.groupBInfo.mean.toFixed(3)} ± ${tResult.groupBInfo.stdDev.toFixed(3)} (n=${tResult.groupBInfo.n})</td></tr>
+    <tr><td><strong>효과크기 (Cohen's d)</strong></td><td colspan="2"><strong>${tResult.cohensD.toFixed(3)}</strong> (0.2: 작음, 0.5: 중간, 0.8: 큼)</td></tr>
+    <tr><td colspan="3" style="background-color:var(--bg-card); font-size:12px; padding:10px 14px; border-radius: var(--radius-sm); border:1px solid var(--border-glass);">${suggestionText}</td></tr>
+    
+    <tr><th colspan="3" style="padding-top:20px;">2. 독립표본 t-검정 결과 상세 (SPSS 양식)</th></tr>
+    <tr>
+      <td colspan="3" style="padding:0; border:none;">
+        <div class="table-scroll-container" style="margin:0;">
+          <table class="data-table" style="font-size:12px; width:100%; border-collapse:collapse; margin:0;">
+            <thead>
+              <tr style="background-color:rgba(114, 46, 209, 0.05);">
+                <th rowspan="2" style="border:1px solid var(--border-glass); padding:8px;">가정 구분</th>
+                <th colspan="3" style="border:1px solid var(--border-glass); text-align:center; padding:8px;">t-검정 (평균의 동일성 검정)</th>
+                <th rowspan="2" style="border:1px solid var(--border-glass); text-align:center; padding:8px;">평균 차이</th>
+                <th colspan="2" style="border:1px solid var(--border-glass); text-align:center; padding:8px;">차이의 95% 신뢰구간</th>
+              </tr>
+              <tr style="background-color:rgba(114, 46, 209, 0.05);">
+                <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">t</th>
+                <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">df (자유도)</th>
+                <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">p-value (양측)</th>
+                <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">하한</th>
+                <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">상한</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="${passed ? 'background-color:rgba(56, 158, 13, 0.08); font-weight:600;' : ''}">
+                <td style="border:1px solid var(--border-glass); padding:8px;"><strong>등분산 가정됨</strong></td>
+                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.equalVariance.tValue.toFixed(3)}</td>
+                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.equalVariance.df.toFixed(2)}</td>
+                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px; color:${tResult.equalVariance.pValue < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${tResult.equalVariance.pValue.toFixed(4)}</strong><br><span style="font-size:10px;font-weight:normal;">(${eqSig})</span></td>
+                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.diff.toFixed(3)}</td>
+                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.equalVariance.ciLower.toFixed(3)}</td>
+                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.equalVariance.ciUpper.toFixed(3)}</td>
+              </tr>
+              <tr style="${!passed ? 'background-color:rgba(207, 19, 34, 0.08); font-weight:600;' : ''}">
+                <td style="border:1px solid var(--border-glass); padding:8px;"><strong>등분산 가정되지 않음</strong></td>
+                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.unequalVariance.tValue.toFixed(3)}</td>
+                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.unequalVariance.df.toFixed(2)}</td>
+                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px; color:${tResult.unequalVariance.pValue < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${tResult.unequalVariance.pValue.toFixed(4)}</strong><br><span style="font-size:10px;font-weight:normal;">(${uneqSig})</span></td>
+                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.diff.toFixed(3)}</td>
+                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.unequalVariance.ciLower.toFixed(3)}</td>
+                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.unequalVariance.ciUpper.toFixed(3)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </td>
+    </tr>
   `;
 
-  // 4. 한국어 해석
-  const isSig = tResult.pValue < 0.05;
+  const activeResult = passed ? tResult.equalVariance : tResult.unequalVariance;
+  const isSig = activeResult.pValue < 0.05;
   const interpretation = document.getElementById("infer-korean-interpretation");
   
   let effectLabel = "매우 작음";
@@ -1518,12 +1797,12 @@ function runIndependentTTestAnalysis() {
 
   interpretation.innerHTML = `
     <p><strong>'${groupVar}'</strong>에 속한 두 집단(${getValLabel(groupVar, gA)} vs ${getValLabel(groupVar, gB)}) 간에 <strong>'${varName}'</strong>의 평균에 유의미한 차이가 있는지 독립표본 t-검정을 실시하였습니다.</p>
-    <p>검정 결과, 두 집단의 평균값 차이는 <strong>${tResult.diff.toFixed(2)}</strong>이며, 이 차이는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${tResult.tValue.toFixed(2)}, p = ${tResult.pValue.toFixed(3)}).</p>
+    <p>분산 동질성 확인 결과, 집단 간 분산 비율 격차에 의거하여 통계적으로 <strong>'${passed ? "등분산 가정됨" : "등분산 가정되지 않음(Welch의 t-검정)"}'</strong> 행의 결과를 인용 채택합니다.</p>
+    <p>분석 결과, 두 집단의 평균값 차이는 <strong>${tResult.diff.toFixed(2)}</strong>이며, 이 차이는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${activeResult.tValue.toFixed(2)}, df = ${activeResult.df.toFixed(2)}, p = ${activeResult.pValue.toFixed(3)}).</p>
     <p>${isSig ? `즉, 우연히 이러한 차이가 관측될 확률이 5% 미만이므로, 두 집단 간에는 실제 평균 점수 차이가 존재한다고 결론 내릴 수 있습니다.` : `즉, 우연한 요인으로 발생할 수 있는 수준의 미미한 차이이므로, 두 집단 간에는 실제 평균적인 차이가 없다고 해석합니다.`}</p>
     <p>추가로 분석된 두 집단 차이의 실질적인 크기(효과크기, Cohen's d)는 <strong>${tResult.cohensD.toFixed(2)}</strong>로, <strong>${effectLabel}</strong>에 해당합니다.</p>
   `;
 
-  // 5. 경고판
   const alertBox = document.getElementById("interpretation-limit-box");
   const alertTxt = document.getElementById("interpretation-limit-text");
   alertBox.style.backgroundColor = "var(--warning-light)";
@@ -1541,6 +1820,9 @@ function runPairedTTestAnalysis() {
   const dataPost = [];
   
   AppState.data.forEach(row => {
+    if (isMissingValue(var1, row[var1]) || isMissingValue(var2, row[var2])) {
+      return;
+    }
     const vPre = parseFloat(row[var1]);
     const vPost = parseFloat(row[var2]);
     if (!isNaN(vPre) && !isNaN(vPost)) {
@@ -1554,20 +1836,17 @@ function runPairedTTestAnalysis() {
     return;
   }
 
-  // 1. 가정 점검
   const diffs = dataPost.map((v, i) => v - dataPre[i]);
   const normDiff = StatsHelper.checkNormality(diffs);
   normDiff.reason = "사전-사후 차이값의 정규성: " + normDiff.reason;
   renderAssumptionDashboard([normDiff]);
 
-  // 2. 검정 연산
   const tResult = StatsHelper.pairedTTest(dataPre, dataPost);
   if (tResult.error) {
     alert(tResult.error);
     return;
   }
 
-  // 3. 결과 요약표
   const table = document.getElementById("infer-result-table");
   const sig = tResult.pValue < 0.05 ? "유의함 (p < 0.05)" : "유의하지 않음 (p ≥ 0.05)";
 
@@ -1584,7 +1863,6 @@ function runPairedTTestAnalysis() {
     <tr><td><strong>차이 95% 신뢰구간</strong></td><td>[${tResult.ciLower.toFixed(3)} ~ ${tResult.ciUpper.toFixed(3)}]</td><td>실제 모집단에서의 변동 범위 추정</td></tr>
   `;
 
-  // 4. 한국어 해석
   const isSig = tResult.pValue < 0.05;
   const interpretation = document.getElementById("infer-korean-interpretation");
   
@@ -1595,13 +1873,12 @@ function runPairedTTestAnalysis() {
     <p>변화의 실질적 크기를 의미하는 효과크기(Cohen's dz)는 <strong>${tResult.cohensD.toFixed(2)}</strong>로 측정되었습니다.</p>
   `;
 
-  // 5. 경고판
   const alertBox = document.getElementById("interpretation-limit-box");
   const alertTxt = document.getElementById("interpretation-limit-text");
   alertBox.style.backgroundColor = "var(--warning-light)";
   alertBox.style.color = "var(--warning)";
   alertBox.style.borderColor = "var(--warning)";
-  alertTxt.textContent = "주의: 전후 차이가 유의하더라도, 다른 외생 변수(예: 성장 효과, 우연히 쉬워진 시험 등)의 통제가 이루어지지 않았다면 변화의 진짜 원인이 오직 해당 조치 때문이라고 단정할 수 없습니다.";
+  alertTxt.textContent = "주의: 전후 차이가 유의하더라도, 다른 외생 변수(예: 성장 효과, 우연히 쉬워진 시험 등)의 통제가 이루어지지 않았다면 변화의 진짜 원인이 오직 해당 조치 때문라고 단정할 수 없습니다.";
 }
 
 // 4) 일원분산분석 ANOVA 실행
@@ -1609,9 +1886,11 @@ function runAnovaAnalysis() {
   const varName = document.getElementById("infer-select-var").value;
   const groupVar = document.getElementById("infer-select-group").value;
 
-  // 집단 분류
   const groupDataMap = {};
   AppState.data.forEach(row => {
+    if (isMissingValue(varName, row[varName]) || isMissingValue(groupVar, row[groupVar])) {
+      return;
+    }
     const v = parseFloat(row[varName]);
     const grp = String(row[groupVar]).trim();
     if (!isNaN(v) && grp !== "") {
@@ -1626,7 +1905,6 @@ function runAnovaAnalysis() {
     return;
   }
 
-  // 1. 가정 점검
   const norms = grpNames.map(name => {
     const chk = StatsHelper.checkNormality(groupDataMap[name]);
     chk.reason = `'${getValLabel(groupVar, name)}' 집단 정규성: ` + chk.reason;
@@ -1638,14 +1916,12 @@ function runAnovaAnalysis() {
   norms.push(homos);
   renderAssumptionDashboard(norms);
 
-  // 2. ANOVA 연산
   const anova = StatsHelper.oneWayAnova(groupDataMap);
   if (anova.error) {
     alert(anova.error);
     return;
   }
 
-  // 3. 결과 요약표
   const table = document.getElementById("infer-result-table");
   const sig = anova.pValue < 0.05 ? "유의함 (p < 0.05)" : "유의하지 않음 (p ≥ 0.05)";
 
@@ -1664,7 +1940,6 @@ function runAnovaAnalysis() {
     <tr><td><strong>효과크기 (에타제곱 η²)</strong></td><td><strong>${anova.etaSquared.toFixed(3)}</strong></td><td>집단 구분이 총 변동의 몇 %를 설명하는가 (0.01: 작음, 0.06: 중간, 0.14: 큼)</td></tr>
   `;
 
-  // 4. 사후검정 테이블 노출 (Tukey HSD)
   const posthocCard = document.getElementById("anova-posthoc-card");
   posthocCard.classList.remove("hidden");
   
@@ -1690,7 +1965,6 @@ function runAnovaAnalysis() {
   });
   posthocTable.innerHTML = posthocHtml;
 
-  // 5. 한국어 해석
   const isSig = anova.pValue < 0.05;
   const interpretation = document.getElementById("infer-korean-interpretation");
   
@@ -1714,7 +1988,6 @@ function runAnovaAnalysis() {
     ${isSig && sigGroups.length > 0 ? `<p><strong>[사후검정 결과]</strong> 다중비교 보정을 통해 쌍별 비교를 수행한 결과, <strong>${sigGroups.join(", ")}</strong> 쌍 간에 통계적으로 유의미한 점수 차이가 확인되었습니다.</p>` : ""}
   `;
 
-  // 6. 경고판
   const alertBox = document.getElementById("interpretation-limit-box");
   const alertTxt = document.getElementById("interpretation-limit-text");
   alertBox.style.backgroundColor = "var(--warning-light)";
@@ -1726,13 +1999,12 @@ function runAnovaAnalysis() {
 // 5) 카이제곱 적합도 검정 실행
 function runChiSquareFitAnalysis() {
   const varName = document.getElementById("infer-select-var").value;
-  const data = AppState.data.map(r => String(r[varName]).trim()).filter(v => v !== "" && v !== "(결측값)");
+  const data = AppState.data.map(r => String(r[varName]).trim()).filter(v => !isMissingValue(varName, v));
 
   const freq = StatsHelper.calculateFrequency(data);
   const observed = freq.list.map(l => l.count);
   const labels = freq.list.map(l => l.value);
 
-  // 1. 가정 점검
   const lowCells = observed.filter(o => o < 5).length;
   const lowCellPct = (lowCells / observed.length) * 100;
   const passed = lowCellPct <= 20;
@@ -1745,14 +2017,12 @@ function runChiSquareFitAnalysis() {
   };
   renderAssumptionDashboard([cellCheck]);
 
-  // 2. 검정 연산
   const chisq = StatsHelper.chiSquareTest(observed, null, "goodness");
   if (chisq.error) {
     alert(chisq.error);
     return;
   }
 
-  // 3. 결과 요약표
   const table = document.getElementById("infer-result-table");
   const sig = chisq.pValue < 0.05 ? "유의함 (p < 0.05)" : "유의하지 않음 (p ≥ 0.05)";
 
@@ -1769,7 +2039,6 @@ function runChiSquareFitAnalysis() {
     <tr class="highlight-row"><td><strong>유의확률 (p-value)</strong></td><td><strong>${chisq.pValue.toFixed(4)}</strong> (${sig})</td><td>차이가 전혀 없는데 우연히 이런 왜곡 빈도가 관측될 확률</td></tr>
   `;
 
-  // 4. 한국어 해석
   const isSig = chisq.pValue < 0.05;
   const interpretation = document.getElementById("infer-korean-interpretation");
   
@@ -1779,7 +2048,6 @@ function runChiSquareFitAnalysis() {
     <p>${isSig ? `즉, 각 범주가 균등한 비율로 선택되지 않고, 특정 항목으로 통계적으로 유의하게 치우친 편향 현상이 나타났음을 뜻합니다.` : `즉, 각 범주가 균등하게 고른 빈도로 분포되어 있어 고른 균등 기대를 충족하고 있습니다.`}</p>
   `;
 
-  // 5. 경고판
   const alertBox = document.getElementById("interpretation-limit-box");
   const alertTxt = document.getElementById("interpretation-limit-text");
   alertBox.style.backgroundColor = "var(--info-light)";
@@ -1793,12 +2061,12 @@ function runChiSquareIndAnalysis() {
   const var1 = document.getElementById("infer-select-var1").value;
   const var2 = document.getElementById("infer-select-var2").value;
 
-  const rowVals = AppState.data.map(r => String(r[var1]).trim()).filter(v => v !== "" && v !== "(결측값)");
-  const colVals = AppState.data.map(r => String(r[var2]).trim()).filter(v => v !== "" && v !== "(결측값)");
+  const pairData = AppState.data.filter(r => !isMissingValue(var1, r[var1]) && !isMissingValue(var2, r[var2]));
+  const rowVals = pairData.map(r => String(r[var1]).trim());
+  const colVals = pairData.map(r => String(r[var2]).trim());
 
   const cross = StatsHelper.calculateCrossTab(rowVals, colVals);
   
-  // 2D 매트릭스 생성
   const matrix = [];
   cross.rows.forEach(r => {
     const rowList = [];
@@ -1808,14 +2076,12 @@ function runChiSquareIndAnalysis() {
     matrix.push(rowList);
   });
 
-  // 1. 검정 연산
   const chisq = StatsHelper.chiSquareTest(matrix, null, "independence");
   if (chisq.error) {
     alert(chisq.error);
     return;
   }
 
-  // 2. 가정 점검
   const cellCheck = {
     passed: chisq.warning === null,
     reason: chisq.warning ? chisq.warning : "모든 셀의 기대 빈도가 충분히 커 카이제곱 검정을 수행하기 적합합니다.",
@@ -1823,7 +2089,6 @@ function runChiSquareIndAnalysis() {
   };
   renderAssumptionDashboard([cellCheck]);
 
-  // 3. 결과 요약표
   const table = document.getElementById("infer-result-table");
   const sig = chisq.pValue < 0.05 ? "유의함 (p < 0.05)" : "유의하지 않음 (p ≥ 0.05)";
 
@@ -1837,7 +2102,6 @@ function runChiSquareIndAnalysis() {
     <tr><td><strong>효과크기 (Cramér's V)</strong></td><td><strong>${chisq.cramersV.toFixed(3)}</strong></td><td>두 범주 변수의 연관성의 강도 (0.1: 약함, 0.3: 보통, 0.5: 강함)</td></tr>
   `;
 
-  // 4. 한국어 해석
   const isSig = chisq.pValue < 0.05;
   const interpretation = document.getElementById("infer-korean-interpretation");
   
@@ -1853,7 +2117,6 @@ function runChiSquareIndAnalysis() {
     <p>상관적 긴밀도를 보인 효과크기(Cramér's V)는 <strong>${chisq.cramersV.toFixed(2)}</strong>로, <strong>${effectLabel}</strong>에 속합니다.</p>
   `;
 
-  // 5. 경고판
   const alertBox = document.getElementById("interpretation-limit-box");
   const alertTxt = document.getElementById("interpretation-limit-text");
   alertBox.style.backgroundColor = "var(--warning-light)";
@@ -1870,6 +2133,9 @@ function runCorrelationAnalysis() {
   const data1 = [];
   const data2 = [];
   AppState.data.forEach(row => {
+    if (isMissingValue(var1, row[var1]) || isMissingValue(var2, row[var2])) {
+      return;
+    }
     const v1 = parseFloat(row[var1]);
     const v2 = parseFloat(row[var2]);
     if (!isNaN(v1) && !isNaN(v2)) {
@@ -1883,21 +2149,18 @@ function runCorrelationAnalysis() {
     return;
   }
 
-  // 1. 가정 점검
   const norm1 = StatsHelper.checkNormality(data1);
   const norm2 = StatsHelper.checkNormality(data2);
   norm1.reason = `'${var1}' 정규성: ` + norm1.reason;
   norm2.reason = `'${var2}' 정규성: ` + norm2.reason;
   renderAssumptionDashboard([norm1, norm2]);
 
-  // 2. 연산
   const corr = StatsHelper.correlationAnalysis(data1, data2);
   if (corr.error) {
     alert(corr.error);
     return;
   }
 
-  // 3. 결과 요약표
   const table = document.getElementById("infer-result-table");
   const sig = corr.pValue < 0.05 ? "유의함 (p < 0.05)" : "유의하지 않음 (p ≥ 0.05)";
   const r = corr.correlationCoefficient;
@@ -1913,7 +2176,6 @@ function runCorrelationAnalysis() {
     <tr><td><strong>계수 95% 신뢰구간</strong></td><td>[${corr.ciLower ? corr.ciLower.toFixed(3) : '-'} ~ ${corr.ciUpper ? corr.ciUpper.toFixed(3) : '-'}]</td><td>상관계수가 모집단에서 가질 범위 추정</td></tr>
   `;
 
-  // 4. 차트 노출
   const chartCard = document.getElementById("infer-chart-card");
   chartCard.classList.remove("hidden");
   
@@ -1955,7 +2217,6 @@ function runCorrelationAnalysis() {
     }
   });
 
-  // 다운로드 이미지 바인딩
   document.getElementById("btn-download-infer-chart").onclick = () => {
     const url = ctx.toDataURL("image/png");
     const a = document.createElement("a");
@@ -1964,7 +2225,6 @@ function runCorrelationAnalysis() {
     a.click();
   };
 
-  // 5. 한국어 해석
   const isSig = corr.pValue < 0.05;
   const interpretation = document.getElementById("infer-korean-interpretation");
   
@@ -1982,7 +2242,6 @@ function runCorrelationAnalysis() {
     <p>${isSig ? `즉, 두 변수 사이에는 실제 <strong>${strengthLabel} ${directionLabel}</strong>가 성립합니다.` : `즉, 통계적으로 관측된 관계 수준이 무시할 수 있는 우연 범위 내이므로, 두 변수는 아무 선형 관계를 가지고 있지 않습니다.`}</p>
   `;
 
-  // 6. 경고판
   const alertBox = document.getElementById("interpretation-limit-box");
   const alertTxt = document.getElementById("interpretation-limit-text");
   alertBox.style.backgroundColor = "var(--danger-light)";
@@ -1999,6 +2258,9 @@ function runRegressionAnalysis() {
   const data1 = [];
   const data2 = [];
   AppState.data.forEach(row => {
+    if (isMissingValue(var1, row[var1]) || isMissingValue(var2, row[var2])) {
+      return;
+    }
     const v1 = parseFloat(row[var1]);
     const v2 = parseFloat(row[var2]);
     if (!isNaN(v1) && !isNaN(v2)) {
@@ -2012,21 +2274,18 @@ function runRegressionAnalysis() {
     return;
   }
 
-  // 1. 가정 점검
   const norm1 = StatsHelper.checkNormality(data1);
   const norm2 = StatsHelper.checkNormality(data2);
   norm1.reason = `독립변수 정규성: ` + norm1.reason;
   norm2.reason = `종속변수 정규성: ` + norm2.reason;
   renderAssumptionDashboard([norm1, norm2]);
 
-  // 2. 연산
   const reg = StatsHelper.linearRegression(data1, data2);
   if (reg.error) {
     alert(reg.error);
     return;
   }
 
-  // 3. 결과 요약표
   const table = document.getElementById("infer-result-table");
   const sigF = reg.pValueF < 0.05 ? "유의함" : "유의하지 않음";
   const sigSlope = reg.pValueSlope < 0.05 ? "유의함" : "유의하지 않음";
@@ -2042,11 +2301,9 @@ function runRegressionAnalysis() {
     <tr class="highlight-row"><td><strong>회귀모형 유의확률 (p-value)</strong></td><td><strong>${reg.pValueF.toFixed(4)}</strong> (${sigF})</td><td>Y 변동 예측이 통계적으로 완전히 유효한지 증명</td></tr>
   `;
 
-  // 4. 시각화 (산점도 + 회귀선)
   const chartCard = document.getElementById("infer-chart-card");
   chartCard.classList.remove("hidden");
   
-  // 차트 그리기
   const ctx = document.getElementById("infer-chart");
   if (AppState.chartInstance) AppState.chartInstance.destroy();
 
@@ -2059,7 +2316,6 @@ function runRegressionAnalysis() {
   const minX = Math.min(...xVals);
   const maxX = Math.max(...xVals);
 
-  // 회귀선 포인트
   const linePoints = [
     { x: minX, y: reg.slope * minX + reg.intercept },
     { x: maxX, y: reg.slope * maxX + reg.intercept }
@@ -2105,7 +2361,6 @@ function runRegressionAnalysis() {
     }
   });
 
-  // 5. 한국어 해석
   const isSig = reg.pValueF < 0.05;
   const interpretation = document.getElementById("infer-korean-interpretation");
   
@@ -2116,7 +2371,6 @@ function runRegressionAnalysis() {
     <p>회귀 기울기 값은 <strong>${reg.slope.toFixed(3)}</strong>로 나타나, '${var1}'가 1단위 증가할 때마다 '${var2}'가 약 <strong>${reg.slope.toFixed(2)}</strong>만큼 ${reg.slope > 0 ? '증가' : '감소'}하는 선형 관계가 나타날 것으로 추정됩니다.</p>
   `;
 
-  // 6. 경고판
   const alertBox = document.getElementById("interpretation-limit-box");
   const alertTxt = document.getElementById("interpretation-limit-text");
   alertBox.style.backgroundColor = "var(--danger-light)";
@@ -2199,7 +2453,6 @@ function runProbabilityCalculation() {
   const gridColor = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)";
   const textColor = isDark ? "#c8cdd4" : "#2d3748";
 
-  // 차트 렌더링용 배열
   const plotLabels = [];
   const plotData = [];
   const fillColors = [];
@@ -2228,7 +2481,6 @@ function runProbabilityCalculation() {
 
     infoStr = `정규분포: 평균 μ = ${mean}, 분산 σ² = ${(std*std).toFixed(2)}`;
 
-    // 연속형 곡선 그리기 (평균 주위 ±4σ 영역)
     const start = mean - 4 * std;
     const end = mean + 4 * std;
     const step = (end - start) / 100;
@@ -2239,7 +2491,6 @@ function runProbabilityCalculation() {
       const y = pdf(x);
       plotData.push(y);
 
-      // 확률 영역 하이라이트 여부 체크
       let isFilled = false;
       if (range === "less" && x <= a) isFilled = true;
       else if (range === "greater" && x >= a) isFilled = true;
@@ -2249,7 +2500,6 @@ function runProbabilityCalculation() {
     }
 
   } else {
-    // 이항분포
     const n = parseInt(document.getElementById("input-bin-n").value);
     const p = parseFloat(document.getElementById("input-bin-p").value);
 
@@ -2263,12 +2513,10 @@ function runProbabilityCalculation() {
     }
 
     const pmf = (k) => {
-      // nCr * p^r * (1-p)^(n-r)
       if (k < 0 || k > n) return 0;
       return jStat.binomial.pdf(k, n, p);
     };
 
-    // 이산형 누적 확률 계산
     let cumProb = 0;
     for (let k = 0; k <= n; k++) {
       const prob = pmf(k);
@@ -2297,13 +2545,11 @@ function runProbabilityCalculation() {
     infoStr = `이항분포 B(${n}, ${p}): 평균 E(X) = ${mean.toFixed(2)}, 분산 V(X) = ${variance.toFixed(2)}`;
   }
 
-  // 1. 값 표시
   document.getElementById("display-prob-expr").textContent = formulaStr;
   document.getElementById("display-prob-val").textContent = pVal.toFixed(4);
   document.getElementById("display-prob-pct").textContent = `(${(pVal * 100).toFixed(2)}%)`;
   document.getElementById("dist-summary-info").innerHTML = `<strong>${infoStr}</strong>`;
 
-  // 2. 그래프 그리기
   const ctx = document.getElementById("prob-chart");
   if (AppState.chartInstance) AppState.chartInstance.destroy();
 
@@ -2320,7 +2566,6 @@ function runProbabilityCalculation() {
           pointRadius: 0,
           fill: true,
           backgroundColor: (ctx) => {
-            // 커스텀 영역 색상을 주기 위해 차트 아래에 가공
             return fillColors;
           },
           segment: {
@@ -2341,7 +2586,6 @@ function runProbabilityCalculation() {
       }
     });
   } else {
-    // 이항분포 (막대 그래프)
     AppState.chartInstance = new Chart(ctx, {
       type: "bar",
       data: {
@@ -2367,7 +2611,6 @@ function runProbabilityCalculation() {
     });
   }
 
-  // 다운로드 이미지 바인딩
   document.getElementById("btn-download-prob-chart").onclick = () => {
     const url = ctx.toDataURL("image/png");
     const a = document.createElement("a");
