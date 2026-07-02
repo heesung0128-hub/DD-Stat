@@ -277,8 +277,8 @@ const StatsHelper = {
     };
   },
 
-    // 3.2 독립표본 t-검정 (Independent Samples t-test)
-  independentTTest(groupA, groupB, assumeEqualVar = true) {
+  // 3.2 독립표본 t-검정 (Independent Samples t-test)
+  independentTTest(groupA, groupB) {
     const statsA = this.calculateDescriptive(groupA);
     const statsB = this.calculateDescriptive(groupB);
 
@@ -293,58 +293,53 @@ const StatsHelper = {
     const v1 = statsA.variance;
     const v2 = statsB.variance;
 
-    let t = 0;
-    let df = 0;
-    let pVal = 0;
-    let method = "";
-
     // 등분산성 자동 체크도 함께 수행
     const homoscedasticity = this.checkHomoscedasticity([groupA, groupB]);
 
-    if (assumeEqualVar) {
-      // 등분산 합동분산 공식
-      const dfTotal = n1 + n2 - 2;
-      const sp2 = ((n1 - 1) * v1 + (n2 - 1) * v2) / dfTotal;
-      const sp = Math.sqrt(sp2);
-      t = (m1 - m2) / (sp * Math.sqrt(1 / n1 + 1 / n2));
-      df = dfTotal;
-      method = "독립표본 t-검정 (등분산 가정)";
-    } else {
-      // Welch's t-test (등분산 미가정)
-      const seWelch = Math.sqrt(v1 / n1 + v2 / n2);
-      t = (m1 - m2) / seWelch;
-      df = Math.pow(v1 / n1 + v2 / n2, 2) / (Math.pow(v1 / n1, 2) / (n1 - 1) + Math.pow(v2 / n2, 2) / (n2 - 1));
-      method = "독립표본 t-검정 (Welch의 t-검정, 등분산 미가정)";
-    }
+    // 1. 등분산 가정 (Equal Variance Assumed)
+    const dfEqual = n1 + n2 - 2;
+    const sp2 = ((n1 - 1) * v1 + (n2 - 1) * v2) / dfEqual;
+    const sp = Math.sqrt(sp2);
+    const tEqual = (m1 - m2) / (sp * Math.sqrt(1 / n1 + 1 / n2));
+    const pValEqual = 2 * (1 - jStat.studentt.cdf(Math.abs(tEqual), dfEqual));
+    const diffSeEqual = sp * Math.sqrt(1 / n1 + 1 / n2);
+    const tCritEqual = jStat.studentt.inv(0.975, dfEqual);
+    const ciLowerEqual = (m1 - m2) - tCritEqual * diffSeEqual;
+    const ciUpperEqual = (m1 - m2) + tCritEqual * diffSeEqual;
 
-    // 양측검정 p-value
-    pVal = 2 * (1 - jStat.studentt.cdf(Math.abs(t), df));
+    // 2. 등분산 미가정 (Equal Variance Not Assumed / Welch's t-test)
+    const seWelch = Math.sqrt(v1 / n1 + v2 / n2);
+    const tWelch = (m1 - m2) / seWelch;
+    const dfWelch = Math.pow(v1 / n1 + v2 / n2, 2) / (Math.pow(v1 / n1, 2) / (n1 - 1) + Math.pow(v2 / n2, 2) / (n2 - 1));
+    const pValWelch = 2 * (1 - jStat.studentt.cdf(Math.abs(tWelch), dfWelch));
+    const tCritWelch = jStat.studentt.inv(0.975, dfWelch);
+    const ciLowerWelch = (m1 - m2) - tCritWelch * seWelch;
+    const ciUpperWelch = (m1 - m2) + tCritWelch * seWelch;
 
     // 효과크기 Cohen's d (합동 표준편차 기준)
     const spCombined = Math.sqrt(((n1 - 1) * v1 + (n2 - 1) * v2) / (n1 + n2 - 2));
     const cohensD = spCombined > 0 ? (m1 - m2) / spCombined : 0;
 
-    // 신뢰구간 (차이의 신뢰구간 95%)
-    const diff = m1 - m2;
-    const diffSe = assumeEqualVar 
-      ? Math.sqrt(((n1 - 1) * v1 + (n2 - 1) * v2) / (n1 + n2 - 2)) * Math.sqrt(1 / n1 + 1 / n2)
-      : Math.sqrt(v1 / n1 + v2 / n2);
-    const tCrit = jStat.studentt.inv(0.975, df);
-    const ciLower = diff - tCrit * diffSe;
-    const ciUpper = diff + tCrit * diffSe;
-
     return {
-      method,
       groupAInfo: { n: n1, mean: m1, stdDev: statsA.stdDev },
       groupBInfo: { n: n2, mean: m2, stdDev: statsB.stdDev },
-      tValue: t,
-      df,
-      pValue: pVal,
       cohensD: Math.abs(cohensD),
-      diff,
-      ciLower,
-      ciUpper,
-      homoscedasticity
+      diff: m1 - m2,
+      homoscedasticity,
+      equalVariance: {
+        tValue: tEqual,
+        df: dfEqual,
+        pValue: pValEqual,
+        ciLower: ciLowerEqual,
+        ciUpper: ciUpperEqual
+      },
+      unequalVariance: {
+        tValue: tWelch,
+        df: dfWelch,
+        pValue: pValWelch,
+        ciLower: ciLowerWelch,
+        ciUpper: ciUpperWelch
+      }
     };
   },
 
@@ -582,7 +577,7 @@ const StatsHelper = {
         pValue: pVal,
         observed,
         expected: expValues,
-        warning: lowCellPercent > 20 ? "기대빈도가 5 미만인 범주가 20%를 초과하여 결과의 신뢰도가 떨어질 수 있습니다." : null
+        warning: lowCellPercent > 20 ? "기대빈도가 5 미만인 범주가 20%를 넘지 않아야 근사 계산이 올바릅니다." : null
       };
 
     } else {
