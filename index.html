@@ -121,7 +121,7 @@
             <div id="drop-zone" class="drop-zone card glass">
               <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
               <h3>이곳에 파일을 드래그하여 놓거나 클릭하세요</h3>
-              <p>CSV, XLSX, XLS 파일 지원 (최대 10MB)</p>
+              <p>CSV, XLSX, XLS 파일 지원 (대용량 지원 - 최대 50MB, 5000행*100열)</p>
               <input type="file" id="file-input" accept=".csv, .xlsx, .xls" class="hidden-input">
               <button class="btn btn-primary mt-4">컴퓨터에서 파일 선택</button>
             </div>
@@ -219,6 +219,25 @@
                   <!-- Javascript가 행 렌더링 -->
                 </tbody>
               </table>
+            </div>
+
+            <!-- 페이지네이션 컨트롤러 -->
+            <div id="table-pagination" class="table-pagination mt-4 hidden">
+              <div class="pagination-left">
+                <button id="btn-page-first" class="btn btn-xs btn-secondary" title="첫 페이지로"><i class="fa-solid fa-angles-left"></i></button>
+                <button id="btn-page-prev" class="btn btn-xs btn-secondary" title="이전 페이지"><i class="fa-solid fa-angle-left"></i></button>
+                <span id="page-info" class="page-info">1 / 1 페이지</span>
+                <button id="btn-page-next" class="btn btn-xs btn-secondary" title="다음 페이지"><i class="fa-solid fa-angle-right"></i></button>
+                <button id="btn-page-last" class="btn btn-xs btn-secondary" title="마지막 페이지로"><i class="fa-solid fa-angles-right"></i></button>
+              </div>
+              <div class="pagination-right">
+                <label for="select-page-size" style="font-size: 12px; margin-right: 6px; font-weight: 500;">페이지당 행 수:</label>
+                <select id="select-page-size" class="form-control" style="width: 80px; display: inline-block; padding: 4px 8px; font-size: 12px; height: auto;">
+                  <option value="50" selected>50행</option>
+                  <option value="100">100행</option>
+                  <option value="200">200행</option>
+                </select>
+              </div>
             </div>
           </div>
         </section>
