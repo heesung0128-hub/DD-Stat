@@ -47,7 +47,9 @@ const AppState = {
   chartInstance: null, // Chart.js 인스턴스
   selectedRows: new Set(), // 삭제용 선택 행 번호
   hypothesis: "",  // 연구 가설
-  theme: "light"   // 테마: light / dark
+  theme: "light",   // 테마: light / dark
+  currentPage: 1,   // 현재 페이지 번호
+  pageSize: 50      // 한 페이지당 노출할 행 수
 };
 
 // --- 값 레이블 (Value Labels) 헬퍼 함수 ---
@@ -57,6 +59,7 @@ function getValueLabelsString(col) {
   return Object.keys(map).map(k => `${k}=${map[k]}`).join(", ");
 }
 
+// --- 결측값 판별 헬퍼 함수 ---
 function parseValueLabelsString(col, str) {
   if (!str || !str.trim()) {
     AppState.valueLabels[col] = {};
@@ -77,7 +80,6 @@ function parseValueLabelsString(col, str) {
   AppState.valueLabels[col] = map;
 }
 
-// --- 값 레이블 치환 헬퍼 ---
 function getValLabel(col, val) {
   const strVal = String(val).trim();
   if (AppState.valueLabels[col] && AppState.valueLabels[col][strVal] !== undefined) {
@@ -86,7 +88,6 @@ function getValLabel(col, val) {
   return val;
 }
 
-// --- 결측값 판별 헬퍼 함수 ---
 function isMissingValue(col, val) {
   if (val === "" || val === null || val === undefined) return true;
   const ruleStr = AppState.missingRules[col];
@@ -137,6 +138,8 @@ function downloadExcelTemplate() {
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet(ws_data);
   XLSX.utils.book_append_sheet(wb, ws, "데이터_입력_양식");
+  
+  // 다운로드 트리거
   XLSX.writeFile(wb, "DD_Stat_Template.xlsx");
 }
 
@@ -151,6 +154,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initInferLayout();
   initProbCalculator();
   initWizard();
+  initPaginationEvents();
 
   // 템플릿 다운로드 버튼 바인딩
   const downloadBtn = document.getElementById("btn-download-template");
@@ -197,6 +201,7 @@ function updateThemeUI() {
 }
 
 function triggerChartRefresh() {
+  // 현재 활성화된 탭에 맞춰 그래프 다시 그리기
   const activeTab = document.querySelector(".sidebar-nav li.active").getAttribute("data-tab");
   if (activeTab === "tab-desc") {
     document.getElementById("btn-run-desc").click();
@@ -223,8 +228,10 @@ function initTabs() {
       item.classList.add("active");
       document.getElementById(tabId).classList.add("active");
 
+      // 헤더 제목/설명 변경
       updateHeaderInfo(tabId);
 
+      // 분석 선택/변수 드롭다운 최신화
       if (tabId === "tab-desc") {
         populateDescSelects();
       } else if (tabId === "tab-infer") {
@@ -344,10 +351,11 @@ function handleUploadedFile(file) {
 }
 
 function processRawData(parsedRows, fields) {
+  // __EMPTY 헤더 정제
   let cleanFields = fields.filter(f => f && !String(f).startsWith("__EMPTY"));
 
-  AppState.valueLabels = {};
-  AppState.missingRules = {};
+  AppState.valueLabels = {}; // 값 레이블 초기화
+  AppState.missingRules = {}; // 결측값 규칙 초기화
   AppState.headers = cleanFields;
   
   const tempRows = [];
@@ -366,12 +374,14 @@ function processRawData(parsedRows, fields) {
         }
       }
     });
+    // 실제 데이터가 존재하는 행만 추가 (전체 셀이 비어있는 빈 행 무시)
     if (hasData) {
       tempRows.push(cleanRow);
     }
   });
   AppState.data = tempRows;
 
+  // 열 유형 초기 자동 판정 (모두 숫자인 경우 continuous, 문자열이 섞였으면 categorical)
   AppState.colTypes = {};
   cleanFields.forEach(f => {
     let numericCount = 0;
@@ -385,14 +395,16 @@ function processRawData(parsedRows, fields) {
     });
 
     if (totalCount > 0 && numericCount / totalCount > 0.8) {
-      AppState.colTypes[f] = "continuous";
+      AppState.colTypes[f] = "continuous"; // 연속형
     } else {
-      AppState.colTypes[f] = "categorical";
+      AppState.colTypes[f] = "categorical"; // 범주형
     }
   });
 
   AppState.selectedRows.clear();
+  AppState.currentPage = 1;
   updateDataWorkspace();
+  resetAnalysisVariables();
   showWorkspace(true);
 }
 
@@ -411,6 +423,7 @@ function showWorkspace(show) {
 
 // --- 샘플 데이터 탑재 ---
 function initSampleData() {
+  // 1) 학업 성취도 & 수면 시간 (Sleep_Hours, Academic_Score)
   document.getElementById("btn-sample-study").addEventListener("click", () => {
     const sleep = [7.5, 6.0, 5.5, 8.0, 4.5, 7.0, 6.5, 5.0, 8.5, 6.0, 7.0, 5.5, 6.5, 7.5, 5.0, 6.0, 8.0, 4.0, 7.0, 6.5, 9.0, 5.8, 6.8, 7.2, 5.2, 6.2, 8.2, 4.8, 7.8, 6.4];
     const score = [85, 72, 65, 90, 50, 80, 78, 60, 92, 70, 82, 68, 75, 88, 62, 74, 86, 45, 81, 76, 95, 71, 80, 84, 61, 73, 89, 58, 87, 72];
@@ -422,6 +435,7 @@ function initSampleData() {
     processRawData(rows, ["수면_시간(시간)", "학업_성적(점수)"]);
   });
 
+  // 2) 식습관 선호도 (Gender, Preferred_Food)
   document.getElementById("btn-sample-diet").addEventListener("click", () => {
     const genders = ["남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여"];
     const foods = ["한식", "일식", "양식", "한식", "양식", "일식", "한식", "일식", "양식", "한식", "한식", "한식", "양식", "일식", "양식", "한식", "한식", "일식", "양식", "일식", "한식", "한식", "양식", "일식", "양식", "일식", "한식", "한식", "양식", "일식"];
@@ -433,6 +447,7 @@ function initSampleData() {
     processRawData(rows, ["성별", "선호_음식"]);
   });
 
+  // 3) 수학 점수 차이 (Group_Method, Math_Score)
   document.getElementById("btn-sample-score").addEventListener("click", () => {
     const groups = ["강의식", "강의식", "강의식", "강의식", "강의식", "토론식", "토론식", "토론식", "토론식", "토론식", "자기주도", "자기주도", "자기주도", "자기주도", "자기주도"];
     const math = [75, 80, 78, 85, 72, 85, 90, 88, 92, 86, 60, 65, 58, 62, 65];
@@ -444,6 +459,7 @@ function initSampleData() {
     processRawData(rows, ["학습_방법", "수학_성적"]);
   });
 
+  // 데이터 초기화 버튼
   document.getElementById("btn-reset-data").addEventListener("click", () => {
     if (confirm("정말로 모든 데이터를 초기화하시겠습니까?")) {
       AppState.data = [];
@@ -452,6 +468,7 @@ function initSampleData() {
       AppState.selectedRows.clear();
       showWorkspace(false);
       
+      // 요약 상태 갱신
       document.getElementById("summary-rows").textContent = "0";
       document.getElementById("summary-vars").textContent = "0";
       document.getElementById("summary-missing").textContent = "0";
@@ -466,6 +483,7 @@ function updateDataWorkspace() {
   const summaryMissing = document.getElementById("summary-missing");
   const infoBadge = document.getElementById("data-info-badge");
 
+  // 기초 정보 계산
   const numRows = AppState.data.length;
   const numCols = AppState.headers.length;
   let missingCount = 0;
@@ -483,6 +501,7 @@ function updateDataWorkspace() {
   summaryMissing.textContent = missingCount;
   infoBadge.textContent = `총 ${numRows}행, ${numCols}열`;
 
+  // 1. 변수 속성 지정 카드 채우기
   const cardsContainer = document.getElementById("variable-cards-container");
   cardsContainer.innerHTML = "";
   
@@ -503,6 +522,7 @@ function updateDataWorkspace() {
     `;
     select.addEventListener("change", (e) => {
       AppState.colTypes[h] = e.target.value;
+      // 데이터를 알맞은 타입으로 컨버전 시도
       AppState.data.forEach(row => {
         if (row[h] !== "") {
           if (e.target.value === "continuous" || e.target.value === "likert") {
@@ -516,6 +536,7 @@ function updateDataWorkspace() {
     });
     card.appendChild(select);
 
+    // 값 레이블 설정 입력 영역 추가
     const labelInputGroup = document.createElement("div");
     labelInputGroup.className = "mt-2";
     
@@ -539,6 +560,7 @@ function updateDataWorkspace() {
     labelInputGroup.appendChild(labelInput);
     card.appendChild(labelInputGroup);
 
+    // 결측값 지정 입력 영역 추가
     const missingInputGroup = document.createElement("div");
     missingInputGroup.className = "mt-2";
     
@@ -562,6 +584,7 @@ function updateDataWorkspace() {
     missingInputGroup.appendChild(missingInput);
     card.appendChild(missingInputGroup);
 
+    // 열 삭제 버튼 추가
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "btn btn-sm btn-danger mt-2 w-100";
     deleteBtn.style.padding = "4px 8px";
@@ -574,8 +597,6 @@ function updateDataWorkspace() {
 
     cardsContainer.appendChild(card);
   });
-
-  resetAnalysisVariables();
 }
 
 function deleteColumn(colName) {
@@ -587,52 +608,107 @@ function deleteColumn(colName) {
     return;
   }
   
+  // 1. headers에서 삭제
   AppState.headers = AppState.headers.filter(h => h !== colName);
   
+  // 2. data 행 객체에서 삭제
   AppState.data.forEach(row => {
     delete row[colName];
   });
   
+  // 3. colTypes, valueLabels, missingRules에서 삭제
   delete AppState.colTypes[colName];
   delete AppState.valueLabels[colName];
   if (AppState.missingRules) {
     delete AppState.missingRules[colName];
   }
   
+  // 4. 워크스페이스 갱신
   updateDataWorkspace();
+  
+  // 5. 분석 변수 선택 폼 갱신 및 초기화
+  resetAnalysisVariables(colName);
 }
 
-function resetAnalysisVariables() {
+function resetAnalysisVariables(colName) {
+  // 1. colName이 명시된 경우 분석용 select들의 선택값 초기화 (기존 로직 유지)
+  if (colName) {
+    const selects = ["desc-select-var1", "desc-select-var2", "infer-select-var", "infer-select-group", "infer-select-var1", "infer-select-var2", "select-recode-col"];
+    selects.forEach(id => {
+      const el = document.getElementById(id);
+      if (el && el.value === colName) {
+        el.value = "";
+      }
+    });
+  }
+
+  // 2. 실제 데이터 테이블 렌더링
   const headerRow = document.getElementById("table-header-row");
   const bodyRows = document.getElementById("table-body-rows");
 
+  // 헤더 생성
   headerRow.innerHTML = `<th style="width: 40px;"><input type="checkbox" id="check-all-rows"></th>`;
   AppState.headers.forEach(h => {
     headerRow.innerHTML += `<th>${h}</th>`;
   });
 
+  // 페이지 슬라이싱 범위 계산
+  const totalRows = AppState.data.length;
+  const start = (AppState.currentPage - 1) * AppState.pageSize;
+  const end = Math.min(start + AppState.pageSize, totalRows);
+  const pageData = AppState.data.slice(start, end);
+
+  // 체크박스 마스터 이벤트 (현재 페이지의 노출된 행들만 선택/해제)
   const checkAll = document.getElementById("check-all-rows");
-  checkAll.addEventListener("change", (e) => {
+  
+  // 마스터 체크박스의 초기 상태 결정 (현재 페이지가 모두 선택되어 있는가)
+  let allCheckedOnPage = pageData.length > 0;
+  for (let i = 0; i < pageData.length; i++) {
+    const globalIdx = start + i;
+    if (!AppState.selectedRows.has(globalIdx)) {
+      allCheckedOnPage = false;
+      break;
+    }
+  }
+  checkAll.checked = allCheckedOnPage;
+
+  checkAll.onchange = (e) => {
     const isChecked = e.target.checked;
     const itemChecks = bodyRows.querySelectorAll(".row-select-check");
     itemChecks.forEach(chk => {
       chk.checked = isChecked;
-      const idx = parseInt(chk.dataset.rowIndex);
-      if (isChecked) AppState.selectedRows.add(idx);
-      else AppState.selectedRows.delete(idx);
+      const localIdx = parseInt(chk.dataset.rowIndex);
+      const globalIdx = start + localIdx;
+      if (isChecked) AppState.selectedRows.add(globalIdx);
+      else AppState.selectedRows.delete(globalIdx);
     });
-  });
+  };
 
+  // 바디 행들 생성
   bodyRows.innerHTML = "";
-  AppState.data.forEach((row, rIdx) => {
+  pageData.forEach((row, rIdx) => {
+    const globalIdx = start + rIdx;
     const tr = document.createElement("tr");
-    tr.id = `data-tr-${rIdx}`;
+    tr.id = `data-tr-${globalIdx}`;
     
     const tdCheck = document.createElement("td");
-    tdCheck.innerHTML = `<input type="checkbox" class="row-select-check" data-row-index="${rIdx}" ${AppState.selectedRows.has(rIdx) ? "checked" : ""}>`;
+    tdCheck.innerHTML = `<input type="checkbox" class="row-select-check" data-row-index="${rIdx}" ${AppState.selectedRows.has(globalIdx) ? "checked" : ""}>`;
     tdCheck.querySelector("input").addEventListener("change", (e) => {
-      if (e.target.checked) AppState.selectedRows.add(rIdx);
-      else AppState.selectedRows.delete(rIdx);
+      if (e.target.checked) {
+        AppState.selectedRows.add(globalIdx);
+      } else {
+        AppState.selectedRows.delete(globalIdx);
+      }
+      
+      // 마스터 체크박스 동기화
+      let allCheckedNow = true;
+      for (let i = 0; i < pageData.length; i++) {
+        if (!AppState.selectedRows.has(start + i)) {
+          allCheckedNow = false;
+          break;
+        }
+      }
+      checkAll.checked = allCheckedNow;
     });
     tr.appendChild(tdCheck);
 
@@ -646,13 +722,13 @@ function resetAnalysisVariables() {
       input.addEventListener("change", (e) => {
         const val = e.target.value;
         if (val === "") {
-          AppState.data[rIdx][h] = "";
+          AppState.data[globalIdx][h] = "";
         } else {
           if (AppState.colTypes[h] === "continuous" || AppState.colTypes[h] === "likert") {
             const num = parseFloat(val);
-            AppState.data[rIdx][h] = isNaN(num) ? val : num;
+            AppState.data[globalIdx][h] = isNaN(num) ? val : num;
           } else {
-            AppState.data[rIdx][h] = val;
+            AppState.data[globalIdx][h] = val;
           }
         }
       });
@@ -662,18 +738,27 @@ function resetAnalysisVariables() {
 
     bodyRows.appendChild(tr);
   });
+
+  // 페이지네이션 컨트롤러 노출 및 업데이트
+  renderPagination();
 }
 
 function initTableControls() {
+  // 행 추가
   document.getElementById("btn-add-row").addEventListener("click", () => {
     const newRow = {};
     AppState.headers.forEach(h => {
       newRow[h] = "";
     });
     AppState.data.push(newRow);
+    
+    // 새 행 추가 시 마지막 페이지로 자동 이동
+    AppState.currentPage = Math.ceil(AppState.data.length / AppState.pageSize);
     updateDataWorkspace();
+    resetAnalysisVariables();
   });
 
+  // 열 추가
   document.getElementById("btn-add-col").addEventListener("click", () => {
     const colName = prompt("새로운 열(변수) 이름을 입력해 주세요:", `변수_${AppState.headers.length + 1}`);
     if (colName) {
@@ -688,9 +773,11 @@ function initTableControls() {
         row[cleanCol] = "";
       });
       updateDataWorkspace();
+      resetAnalysisVariables();
     }
   });
 
+  // 선택 삭제
   document.getElementById("btn-delete-selected").addEventListener("click", () => {
     if (AppState.selectedRows.size === 0) {
       alert("삭제할 행을 체크해 주세요.");
@@ -698,18 +785,26 @@ function initTableControls() {
     }
 
     if (confirm(`선택한 ${AppState.selectedRows.size}개의 행을 삭제하시겠습니까?`)) {
+      // 인덱스가 뒤바뀌지 않게 역순으로 제거
       const sortedIdxs = Array.from(AppState.selectedRows).sort((a, b) => b - a);
       sortedIdxs.forEach(idx => {
         AppState.data.splice(idx, 1);
       });
       AppState.selectedRows.clear();
+      
+      // 페이지 범위 보정
+      const totalPages = Math.ceil(AppState.data.length / AppState.pageSize);
+      AppState.currentPage = Math.min(AppState.currentPage, Math.max(1, totalPages));
+      
       updateDataWorkspace();
+      resetAnalysisVariables();
     }
   });
 }
 
 // --- 결측값, 역코딩, 이상치 탐색 도구 ---
 function initPreprocessTools() {
+  // 1) 결측치 적용
   document.getElementById("btn-apply-missing").addEventListener("click", () => {
     const method = document.getElementById("select-missing-handler").value;
     if (AppState.data.length === 0) return;
@@ -742,16 +837,21 @@ function initPreprocessTools() {
       });
     }
 
+    const totalPages = Math.ceil(AppState.data.length / AppState.pageSize);
+    AppState.currentPage = Math.min(AppState.currentPage, Math.max(1, totalPages));
     updateDataWorkspace();
+    resetAnalysisVariables();
     alert("결측치 전처리가 완료되었습니다.");
   });
 
+  // 역코딩 선택 목록 로드 헬퍼
   document.getElementById("select-recode-col").addEventListener("focus", (e) => {
     e.target.innerHTML = `<option value="">변수 선택</option>` + AppState.headers
       .filter(h => AppState.colTypes[h] === "continuous" || AppState.colTypes[h] === "likert")
       .map(h => `<option value="${h}">${h}</option>`).join("");
   });
 
+  // 2) 역코딩 적용
   document.getElementById("btn-apply-recode").addEventListener("click", () => {
     const colName = document.getElementById("select-recode-col").value;
     const scale = parseInt(document.getElementById("select-recode-scale").value);
@@ -771,9 +871,11 @@ function initPreprocessTools() {
     });
 
     updateDataWorkspace();
+    resetAnalysisVariables();
     alert(`변수 '${colName}'의 척도(${scale}점 기준) 역코딩이 ${count}개 데이터에 적용되었습니다.`);
   });
 
+  // 3) 이상치 탐색
   const outlierModal = document.getElementById("outlier-modal");
   const closeOutlier = document.getElementById("btn-close-outlier");
   const confirmOutlier = document.getElementById("btn-confirm-outlier");
@@ -781,10 +883,11 @@ function initPreprocessTools() {
   document.getElementById("btn-detect-outliers").addEventListener("click", () => {
     if (AppState.data.length === 0) return;
 
+    // 테이블의 모든 이상치 마킹 초기화
     AppState.headers.forEach(h => {
       AppState.data.forEach((r, idx) => {
         const tr = document.getElementById(`data-tr-${idx}`);
-        if (tr) tr.style.backgroundColor = "";
+        if (tr) tr.classList.remove("danger");
       });
     });
 
@@ -793,6 +896,7 @@ function initPreprocessTools() {
       if (AppState.colTypes[h] === "continuous") {
         const desc = StatsHelper.calculateDescriptive(AppState.data.map(r => r[h]));
         if (desc && desc.outliers.length > 0) {
+          // 테이블 행 마킹 및 모달 기록
           AppState.data.forEach((row, idx) => {
             const v = parseFloat(row[h]);
             if (!isNaN(v) && (v < desc.lowerBound || v > desc.upperBound)) {
@@ -841,6 +945,7 @@ function initPreprocessTools() {
   closeOutlier.addEventListener("click", () => outlierModal.classList.add("hidden"));
   confirmOutlier.addEventListener("click", () => {
     outlierModal.classList.add("hidden");
+    // 하이라이팅 초기화
     AppState.data.forEach((r, idx) => {
       const tr = document.getElementById(`data-tr-${idx}`);
       if (tr) tr.style.backgroundColor = "";
@@ -864,6 +969,7 @@ function populateDescSelects() {
     }
   });
 
+  // 변수 선택 이벤트 바인딩
   document.getElementById("btn-run-desc").onclick = runDescriptiveAnalysis;
 }
 
@@ -893,9 +999,11 @@ function runDescriptiveAnalysis() {
   resultsEmpty.classList.add("hidden");
   resultsContent.classList.remove("hidden");
 
+  // 1. 통계 요약표 그리기
   const descTable = document.getElementById("desc-table");
   
   if (!var2) {
+    // 단일 변수 기술통계
     if (type1 === "continuous") {
       const stats = StatsHelper.calculateDescriptive(data1);
       if (!stats) return;
@@ -917,6 +1025,7 @@ function runDescriptiveAnalysis() {
       if (chartType === "auto") chartType = "histogram";
       
     } else {
+      // 범주형 기술통계
       const freqs = StatsHelper.calculateFrequency(data1);
       let html = `<tr><th>범주 값</th><th>빈도 (Count)</th><th>비율 (Percentage)</th></tr>`;
       freqs.list.forEach(item => {
@@ -929,9 +1038,11 @@ function runDescriptiveAnalysis() {
       if (chartType === "auto") chartType = "bar";
     }
     
+    // 해석 완성하기
     renderDescInterpretation(var1, null);
     
   } else {
+    // 두 변수의 교차표 (Cross Tab)
     const cross = StatsHelper.calculateCrossTab(data1, data2);
     
     let html = `<tr><th>${var1} \\ ${var2}</th>`;
@@ -946,6 +1057,7 @@ function runDescriptiveAnalysis() {
       html += `<td><strong>${cross.rowTotals[r]}명</strong></td></tr>`;
     });
     
+    // 하단 합계행
     html += `<tr class="highlight-row"><td><strong>합계</strong></td>`;
     cross.cols.forEach(c => {
       html += `<td><strong>${cross.colTotals[c]}명</strong></td>`;
@@ -957,6 +1069,7 @@ function runDescriptiveAnalysis() {
     renderDescInterpretation(var1, var2);
   }
 
+  // 2. 그래프 그리기
   drawDescriptiveChart(var1, var2, chartType);
 }
 
@@ -964,6 +1077,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
   const ctx = document.getElementById("desc-chart");
   const stemLeaf = document.getElementById("stem-leaf-display");
   
+  // 이전 차트 인스턴스 소멸
   if (AppState.chartInstance) {
     AppState.chartInstance.destroy();
     AppState.chartInstance = null;
@@ -984,6 +1098,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
   const gridColor = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)";
   const textColor = isDark ? "#c8cdd4" : "#2d3748";
 
+  // 차트 테마 컬러
   const primaryColor = "rgba(114, 46, 209, 0.7)";
   const secondaryColor = "rgba(22, 119, 255, 0.7)";
   const hoverColor = "rgba(114, 46, 209, 0.9)";
@@ -997,6 +1112,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
   ];
 
   if (chartType === "histogram") {
+    // 히스토그램 연산 (Sturges Rule로 bin 수 결정)
     const stats = StatsHelper.calculateDescriptive(data1);
     if (!stats) return;
 
@@ -1013,7 +1129,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
 
     data1.forEach(v => {
       let idx = Math.floor((v - stats.min) / binWidth);
-      if (idx >= numBins) idx = numBins - 1;
+      if (idx >= numBins) idx = numBins - 1; // max값 보정
       if (idx >= 0) bins[idx]++;
     });
 
@@ -1247,8 +1363,8 @@ function drawDescriptiveChart(var1, var2, chartType) {
 
   } else if (chartType === "line") {
     const freqs = StatsHelper.calculateFrequency(data1);
-    const labels = freqs.list.map(l => getValLabel(var1, l.value)).reverse();
-    const values = freqs.list.map(l => l.count).reverse();
+    const labels = freqs.list.map(l => getValLabel(var1, l.value));
+    const values = freqs.list.map(l => l.count);
 
     AppState.chartInstance = new Chart(ctx, {
       type: "line",
@@ -1487,6 +1603,9 @@ function updateInferMethodOptions() {
           <select id="infer-select-group" class="form-control mt-1">${catOptionsHTML}</select>
           <p class="input-tip mt-1">예: 성별에 따른 성적 비교 시, 수치 변수는 '성적', 집단 변수는 '성별'</p>
         </div>
+        <div class="form-group mt-3">
+          <label><input type="checkbox" id="infer-chk-equalvar" checked> 등분산성 가정 적용</label>
+        </div>
       `;
       break;
       
@@ -1619,7 +1738,6 @@ function runInferentialAnalysis() {
   }
 }
 
-// 1) 신뢰구간 분석 실행
 function runCIAnalysis() {
   const varName = document.getElementById("infer-select-var").value;
   const level = parseFloat(document.getElementById("infer-select-level").value);
@@ -1657,7 +1775,6 @@ function runCIAnalysis() {
   alertTxt.textContent = "안내: 신뢰구간 추정은 모평균이 위치할 가능성이 높은 범위를 통계적으로 제시하는 것이며, 표본이 무작위적(대표성)으로 잘 수집되었을 때 정확한 신뢰도를 확보할 수 있습니다.";
 }
 
-// 2) 독립표본 t-검정 실행
 function runIndependentTTestAnalysis() {
   const varName = document.getElementById("infer-select-var").value;
   const groupVar = document.getElementById("infer-select-group").value;
@@ -1811,7 +1928,6 @@ function runIndependentTTestAnalysis() {
   alertTxt.textContent = "주의: t-검정 결과 집단 차이가 유의미하더라도 이것이 '집단 분류'가 평균 차이의 온전한 원인이라는 인과관계를 의미하지는 않습니다. 외부의 다른 통제되지 않은 요인이 작동했을 수 있습니다.";
 }
 
-// 3) 대응표본 t-검정 실행
 function runPairedTTestAnalysis() {
   const var1 = document.getElementById("infer-select-var1").value;
   const var2 = document.getElementById("infer-select-var2").value;
@@ -1870,7 +1986,7 @@ function runPairedTTestAnalysis() {
     <p>동일한 대상을 비교하여 <strong>'${var1}'</strong>(사전)과 <strong>'${var2}'</strong>(사후) 사이에 통계적으로 의미 있는 변화가 나타났는지 대응표본 t-검정을 실시하였습니다.</p>
     <p>검정 결과, 사전 대비 사후의 평균 변화량은 <strong>${tResult.meanDiff.toFixed(2)}</strong>이며, 이 변화는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${tResult.tValue.toFixed(2)}, p = ${tResult.pValue.toFixed(3)}).</p>
     <p>${isSig ? `즉, 우연한 점수 요동으로 인해서 이런 수준의 전후 차이가 발생했을 가능성이 극히 낮으므로, 실시한 조치/시간 흐름에 따른 변동 효과가 실재한다고 해석할 수 있습니다.` : `즉, 자연스러운 점수 기복 내에 속하므로 사전과 사후 사이에 실질적인 효과가 나타났다고 판단하기 어렵습니다.`}</p>
-    <p>변화의 실질적 크기를 의미하는 효과크기(Cohen's dz)는 <strong>${tResult.cohensD.toFixed(2)}</strong>로 측정되었습니다.</p>
+    <p>변화의 실질적 크기를 의미하는 효과크기(Cohen's dz)는 <strong>${tResult.cohensD.toFixed(2)}</strong>로, 효과크기가 보통 수준임을 의미합니다.</p>
   `;
 
   const alertBox = document.getElementById("interpretation-limit-box");
@@ -1881,7 +1997,6 @@ function runPairedTTestAnalysis() {
   alertTxt.textContent = "주의: 전후 차이가 유의하더라도, 다른 외생 변수(예: 성장 효과, 우연히 쉬워진 시험 등)의 통제가 이루어지지 않았다면 변화의 진짜 원인이 오직 해당 조치 때문라고 단정할 수 없습니다.";
 }
 
-// 4) 일원분산분석 ANOVA 실행
 function runAnovaAnalysis() {
   const varName = document.getElementById("infer-select-var").value;
   const groupVar = document.getElementById("infer-select-group").value;
@@ -1984,7 +2099,7 @@ function runAnovaAnalysis() {
     <p>집단 변수 <strong>'${groupVar}'</strong>에 의해 나누어진 세 개 이상의 집단 간에 <strong>'${varName}'</strong>의 평균값 차이가 있는지 일원분산분석(One-way ANOVA)을 수행했습니다.</p>
     <p>분석 결과, 집단 간 평균값들의 격차는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (F = ${anova.fValue.toFixed(2)}, p = ${anova.pValue.toFixed(3)}).</p>
     <p>${isSig ? `즉, 집단 간 평균 차이가 단순히 우연히 나타났을 확률이 극히 희박하므로, 세 집단 중 적어도 어느 집단 간에는 유의미한 평균 차이가 존재합니다.` : `즉, 집단 간에 존재하는 차이는 단순 우연 편차 수준으로 볼 수 있어, 모집단에서 평균 차이가 실재한다고 볼 수 없습니다.`}</p>
-    <p>요인의 실질적인 설명력 크기인 에타제곱(η²)은 <strong>${anova.etaSquared.toFixed(3)}</strong>로, 집단 분류가 전체 변동의 <strong>${(anova.etaSquared * 100).toFixed(1)}%</strong>를 설명하는 <strong>${effectLabel}</strong>에 해당합니다.</p>
+    <p>요인의 실질적인 설명력 크기인 에타제곱(η²)은 <strong>${anova.etaSquared.toFixed(3)}</strong>로, 집단 분류가 전체 변동의 <strong>${(anova.etaSquared * 100).toFixed(1)}%</strong>를 설명(예측)하는 <strong>${effectLabel}</strong>에 해당합니다.</p>
     ${isSig && sigGroups.length > 0 ? `<p><strong>[사후검정 결과]</strong> 다중비교 보정을 통해 쌍별 비교를 수행한 결과, <strong>${sigGroups.join(", ")}</strong> 쌍 간에 통계적으로 유의미한 점수 차이가 확인되었습니다.</p>` : ""}
   `;
 
@@ -1996,7 +2111,6 @@ function runAnovaAnalysis() {
   alertTxt.textContent = "주의: 분산분석(ANOVA)은 집단 간 평균의 차이를 식별하지만, 집단 구분이 독립적인 제3의 통제되지 않은 환경 요소들과 복합적으로 얽혀있을 수 있으므로 단정적인 인과 해석은 지양해야 합니다.";
 }
 
-// 5) 카이제곱 적합도 검정 실행
 function runChiSquareFitAnalysis() {
   const varName = document.getElementById("infer-select-var").value;
   const data = AppState.data.map(r => String(r[varName]).trim()).filter(v => !isMissingValue(varName, v));
@@ -2056,7 +2170,6 @@ function runChiSquareFitAnalysis() {
   alertTxt.textContent = "주의: 카이제곱 적합도 검정은 가설상의 확률(이론적 분포)과 수집 데이터 빈도를 비교하며, N이 너무 작으면 신뢰를 담보하기 어렵습니다.";
 }
 
-// 6) 카이제곱 독립성 검정 실행
 function runChiSquareIndAnalysis() {
   const var1 = document.getElementById("infer-select-var1").value;
   const var2 = document.getElementById("infer-select-var2").value;
@@ -2125,7 +2238,6 @@ function runChiSquareIndAnalysis() {
   alertTxt.textContent = "주의: 카이제곱 연관성 유의는 두 요인이 연계되어 움직인다는 관계(상관)를 말하며, 이것이 한쪽이 다른 한쪽을 바꾸는 '원인과 결과(인과)'라는 직접적 논거가 되지 않습니다.";
 }
 
-// 7) 피어슨 상관분석 실행
 function runCorrelationAnalysis() {
   const var1 = document.getElementById("infer-select-var1").value;
   const var2 = document.getElementById("infer-select-var2").value;
@@ -2250,7 +2362,6 @@ function runCorrelationAnalysis() {
   alertTxt.textContent = "CRITICAL WARNING (인과 비약 방지): 상관관계(Correlation)는 두 요인이 연동해 움직이는 징후를 나타낼 뿐이며, 결코 인과관계(Causation)를 설명하지 못합니다. 즉, '공부 시간이 많아서 성적이 잘나온다'처럼 스마트폰이 수면을 줄인 원인이라고 단정하면 안 되며, 다른 요인(예: 조력 수준 등)이 매개했을 수 있습니다.";
 }
 
-// 8) 단순선형회귀분석 실행
 function runRegressionAnalysis() {
   const var1 = document.getElementById("infer-select-var1").value;
   const var2 = document.getElementById("infer-select-var2").value;
@@ -2379,7 +2490,6 @@ function runRegressionAnalysis() {
   alertTxt.textContent = "CRITICAL WARNING (인과 비약 방지): 회귀 분석은 예측 방정식 형태로 인과를 흉내 내지만, 실제로는 통계적 '선형 패턴'을 수치화한 것에 불과합니다. 변수 간의 논리적 메커니즘과 이론적 기반이 없거나 교란 변수를 차단하지 못했다면 결코 완벽한 원인-결과(인과)로 단정할 수 없으며 오직 상관성에 준해 보고해야 합니다.";
 }
 
-// 가정 점검 대시보드 렌더러
 function renderAssumptionDashboard(checks) {
   const container = document.getElementById("assumption-list-container");
   container.innerHTML = "";
@@ -2633,22 +2743,21 @@ function initWizard() {
   const step3 = document.getElementById("wizard-step-3");
   const step4 = document.getElementById("wizard-step-4");
 
-  let recommendedMethod = "ind-t"; // 추천 타겟 변수
+  let recommendedMethod = "ind-t"; 
 
   nextBtn.addEventListener("click", () => {
     const purpose = document.querySelector('input[name="opt-purpose"]:checked').value;
 
     if (currentStep === 1) {
       if (purpose === "compare") {
-        currentStep = 2; // 집단 수 물어보기로 이동
+        currentStep = 2; 
         step1.classList.remove("active");
         step2.classList.add("active");
       } else if (purpose === "relation") {
-        currentStep = 3; // 변수 형태 물어보기로 이동
+        currentStep = 3; 
         step1.classList.remove("active");
         step3.classList.add("active");
       } else {
-        // 비율 확인의 경우 -> 카이제곱 적합도로 고정 추천
         currentStep = 4;
         recommendedMethod = "chisq-fit";
         step1.classList.remove("active");
@@ -2657,7 +2766,6 @@ function initWizard() {
       }
       prevBtn.classList.remove("hidden");
     } else if (currentStep === 2) {
-      // 집단 평균 비교 분기
       const groups = document.querySelector('input[name="opt-groups"]:checked').value;
       currentStep = 4;
       step2.classList.remove("active");
@@ -2668,14 +2776,13 @@ function initWizard() {
       else recommendedMethod = "paired-t";
       renderRecommendation();
     } else if (currentStep === 3) {
-      // 상관/회귀 비교 분기
       const varType = document.querySelector('input[name="opt-var-type"]:checked').value;
       currentStep = 4;
       step3.classList.remove("active");
       step4.classList.add("active");
 
-      if (varType === "continuous") recommendedMethod = "correlation"; // 피어슨 상관분석
-      else recommendedMethod = "chisq-ind"; // 카이제곱 독립성
+      if (varType === "continuous") recommendedMethod = "correlation"; 
+      else recommendedMethod = "chisq-ind"; 
       renderRecommendation();
     }
 
@@ -2771,17 +2878,13 @@ function initWizard() {
     }
   }
 
-  // 추천된 분석으로 강제 탭 이동 및 로드
   goBtn.addEventListener("click", () => {
-    // 추론통계 탭 활성화
     const inferTab = document.querySelector('[data-tab="tab-infer"]');
     inferTab.click();
 
-    // 해당 분석 드롭다운을 추천 기법으로 강제 매칭
     document.getElementById("infer-method").value = recommendedMethod;
     updateInferMethodOptions();
     
-    // 원래 단계로 리셋
     step4.classList.remove("active");
     step1.classList.add("active");
     prevBtn.classList.add("hidden");
@@ -2800,7 +2903,6 @@ copyBtns.forEach(btn => {
     const table = document.getElementById(targetId);
     if (!table) return;
 
-    // 클립보드에 HTML 테이블 복사
     let range = document.createRange();
     range.selectNode(table);
     window.getSelection().removeAllRanges();
@@ -2817,3 +2919,72 @@ copyBtns.forEach(btn => {
     window.getSelection().removeAllRanges();
   });
 });
+
+// --- 페이지네이션 컨트롤러 렌더링 및 이벤트 ---
+function renderPagination() {
+  const paginationContainer = document.getElementById("table-pagination");
+  if (AppState.data.length === 0) {
+    paginationContainer.classList.add("hidden");
+    return;
+  }
+  paginationContainer.classList.remove("hidden");
+
+  const totalPages = Math.ceil(AppState.data.length / AppState.pageSize);
+  
+  if (AppState.currentPage > totalPages) {
+    AppState.currentPage = Math.max(1, totalPages);
+  }
+
+  document.getElementById("page-info").textContent = `${AppState.currentPage} / ${totalPages} 페이지 (총 ${AppState.data.length}행)`;
+
+  document.getElementById("btn-page-first").disabled = AppState.currentPage === 1;
+  document.getElementById("btn-page-prev").disabled = AppState.currentPage === 1;
+  document.getElementById("btn-page-next").disabled = AppState.currentPage === totalPages;
+  document.getElementById("btn-page-last").disabled = AppState.currentPage === totalPages;
+}
+
+function initPaginationEvents() {
+  const btnFirst = document.getElementById("btn-page-first");
+  const btnPrev = document.getElementById("btn-page-prev");
+  const btnNext = document.getElementById("btn-page-next");
+  const btnLast = document.getElementById("btn-page-last");
+  const selectSize = document.getElementById("select-page-size");
+
+  if (!btnFirst) return; 
+
+  btnFirst.onclick = () => {
+    if (AppState.currentPage > 1) {
+      AppState.currentPage = 1;
+      resetAnalysisVariables();
+    }
+  };
+
+  btnPrev.onclick = () => {
+    if (AppState.currentPage > 1) {
+      AppState.currentPage--;
+      resetAnalysisVariables();
+    }
+  };
+
+  btnNext.onclick = () => {
+    const totalPages = Math.ceil(AppState.data.length / AppState.pageSize);
+    if (AppState.currentPage < totalPages) {
+      AppState.currentPage++;
+      resetAnalysisVariables();
+    }
+  };
+
+  btnLast.onclick = () => {
+    const totalPages = Math.ceil(AppState.data.length / AppState.pageSize);
+    if (AppState.currentPage < totalPages) {
+      AppState.currentPage = totalPages;
+      resetAnalysisVariables();
+    }
+  };
+
+  selectSize.onchange = (e) => {
+    AppState.pageSize = parseInt(e.target.value);
+    AppState.currentPage = 1;
+    resetAnalysisVariables();
+  };
+}
