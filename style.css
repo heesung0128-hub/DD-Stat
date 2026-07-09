@@ -477,6 +477,15 @@ a {
   padding: 0.75rem 1rem;
   text-align: left;
   border-bottom: 1px solid var(--border-glass);
+  min-width: 110px; /* 열 넓이를 늘려 데이터 가독성 확보 */
+}
+
+/* 체크박스가 들어가는 첫 번째 열 크기 예외 처리 */
+.data-table th:first-child, .data-table td:first-child {
+  min-width: 40px;
+  width: 40px;
+  text-align: center;
+  padding: 0.75rem 0.5rem;
 }
 
 .data-table th {
@@ -501,12 +510,16 @@ a {
   background-color: var(--bg-app);
 }
 
-/* VARIABLE CARDS */
+.variable-settings-panel {
+  margin-bottom: 2.5rem; /* 변수 유형 지정 영역 하단 여백 추가 */
+}
+
 .variable-cards-container {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 1rem;
   margin-top: 1rem;
+  margin-bottom: 2rem; /* 아래 전처리 도구들과의 간격 확보 */
   padding: 0.5rem;
   max-height: 320px;
   overflow-y: auto;
