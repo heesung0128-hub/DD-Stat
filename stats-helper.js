@@ -329,7 +329,7 @@ const StatsHelper = {
     };
   },
 
-  // 3.2 독립표본 t-검정 (Independent Samples t-test)
+    // 3.2 독립표본 t-검정 (Independent Samples t-test)
   independentTTest(groupA, groupB) {
     const statsA = this.calculateDescriptive(groupA);
     const statsB = this.calculateDescriptive(groupB);
@@ -345,7 +345,7 @@ const StatsHelper = {
     const v1 = statsA.variance;
     const v2 = statsB.variance;
 
-    // 등분산성 자동 체크도 함께 수행 (르빈의 등분산성 검정으로 작동)
+    // 등분산성 자동 체크도 함께 수행
     const homoscedasticity = this.checkHomoscedasticity([groupA, groupB]);
 
     // 1. 등분산 가정 (Equal Variance Assumed)
@@ -453,7 +453,6 @@ const StatsHelper = {
 
   // 3.4 일원분산분석 (One-way ANOVA)
   oneWayAnova(groupDataMap) {
-    // groupDataMap: { "A": [1,2,3], "B": [4,5], "C": [7,8,9] }
     const groupNames = Object.keys(groupDataMap);
     const k = groupNames.length;
     if (k < 3) {
@@ -594,7 +593,6 @@ const StatsHelper = {
       const totalObs = observed.reduce((a, b) => a + b, 0);
       let expValues = [];
       if (!expected) {
-        // 기본값: 균등 분포
         expValues = Array(n).fill(totalObs / n);
       } else {
         const totalExpProb = expected.reduce((a, b) => a + b, 0);
