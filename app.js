@@ -196,6 +196,7 @@ function initTheme() {
   });
 }
 
+// 테마 변경 시 차트 새로고침 유틸
 function updateThemeUI() {
   const btnToggle = document.getElementById("btn-theme-toggle");
   const icon = btnToggle.querySelector("i");
@@ -668,7 +669,7 @@ function resetAnalysisVariables(colName) {
   const end = Math.min(start + AppState.pageSize, totalRows);
   const pageData = AppState.data.slice(start, end);
 
-  // 체크박스 마스터 이벤트 (현재 페이지의 노출된 행들만 선택/해제)
+  // 체크박스 마스터 이벤트 (현재 페이지의 행들을 다량으로 다룰 때 요긴)
   const checkAll = document.getElementById("check-all-rows");
   
   // 마스터 체크박스의 초기 상태 결정 (현재 페이지가 모두 선택되어 있는가)
@@ -1353,7 +1354,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
     c.lineTo(cvs.width - padding, h - 40);
     c.stroke();
 
-    // 눈금 눈금
+    // 눈금 그리기
     const ticks = [stats.min, stats.q1, stats.median, stats.q3, stats.max];
     ticks.forEach(t => {
       const x = scale(t);
@@ -1907,7 +1908,7 @@ function runInferentialAnalysis() {
   const method = document.getElementById("infer-method").value;
   const hypothesis = document.getElementById("txt-hypothesis").value.trim();
 
-  // 가설 오용 방지 검증
+  // 가설 적었는지 검사 (p-hacking 오용 방지 장치)
   if (!hypothesis) {
     alert("오용 방지를 위해 통계 검정 실행 전 반드시 '연구 가설 적어보기'를 입력해 주십시오!");
     document.getElementById("txt-hypothesis").focus();
@@ -1957,7 +1958,7 @@ function runInferentialAnalysis() {
   }
 }
 
-// 1) 신뢰구간 분석 실행
+// 1) 모평균 신뢰구간 추정 분석 실행
 function runCIAnalysis() {
   const varName = document.getElementById("infer-select-var").value;
   const level = parseFloat(document.getElementById("infer-select-level").value);
@@ -2333,8 +2334,8 @@ function runPairedTTestAnalysis() {
     <p>동일한 대상을 기준으로 측정된 <strong>'${var1}'</strong>(사전)와 <strong>'${var2}'</strong>(사후) 간에 유의미한 차이가 있는지 대응표본 t-검정을 수행하였습니다.</p>
     <p>사전-사후 차이값에 대한 정규성 가정 평가 결과(p = ${normDiff.passed ? '≥ 0.05 충족' : '< 0.05 위배 의심'})를 참조하십시오.</p>
     <p>분석 결과, 사전 대비 사후 평균 점수 변화량은 <strong>${tResult.meanDiff.toFixed(2)}</strong>이며, 이 변화는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${tResult.tValue.toFixed(2)}, df = ${tResult.df}, p = ${tResult.pValue.toFixed(3)}).</p>
-    <p>${isSig ? `즉, 개입 조치(프로그램)를 거친 후 평균 성적에 실제 유의미한 변동이 발생했다고 증명할 수 있습니다.` : `즉, 우연한 자연 변동 오차 범주 내의 격차이므로, 전후 점수에는 실제 유의미한 변화가 발생하지 않았다고 해석됩니다.`}</p>
-    <p>실제 변화 효과의 상대적 크기(Cohen's dz)는 <strong>${tResult.cohensD.toFixed(2)}</strong>로, <strong>${effectLabel}</strong>에 해당합니다.</p>
+    <p>${isSig ? `즉, 개입 프로그램 활동을 거친 후 평균 점수에 실제 유의미한 변화가 확인되었습니다.` : `즉, 자연스러운 오차 편차 수준의 경미한 변화이며, 프로그램 전후 점수에 유의미한 격차는 성립하지 않습니다.`}</p>
+    <p>변화 효과의 크기(Cohen's dz)는 <strong>${tResult.cohensD.toFixed(2)}</strong>로, <strong>${effectLabel}</strong>에 해당합니다.</p>
   `;
 
   // 5. 경고판
@@ -2524,18 +2525,19 @@ function runAnovaAnalysis() {
   
   // 1) Duncan 사후검정 표
   let duncanHtml = `
-    <div style="margin-bottom:24px;">
-      <h5 style="margin-bottom:8px; color:var(--primary); font-weight:600;"><i class="fa-solid fa-list-check"></i> Duncan의 다중 범위 검정 (MRT)</h5>
-      <table class="data-table-result" style="width:100%; font-size:11px;">
-        <thead>
-          <tr style="background-color:rgba(114, 46, 209, 0.03);">
-            <th>집단 비교 쌍 (I vs J)</th>
-            <th>평균 차이 (I-J)</th>
-            <th>임계 범위 (LSR)</th>
-            <th>유의 여부 (α=0.05)</th>
-          </tr>
-        </thead>
-        <tbody>
+    <div style="margin-bottom:28px; border: 1px solid var(--border-glass); border-radius: var(--radius-sm); padding: 18px; background-color: rgba(114, 46, 209, 0.02); box-shadow: var(--shadow-sm);">
+      <h4 style="margin-top:0; margin-bottom:12px; color:var(--primary); font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px;"><span style="background-color:var(--primary); color:white; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:600;">기법 1</span> Duncan의 다중 범위 검정 (MRT)</h4>
+      <div class="table-scroll-container" style="margin:0; border:none; background:transparent; max-height:none;">
+        <table class="data-table-result" style="width:100%; font-size:11px; border-collapse:collapse;">
+          <thead>
+            <tr style="background-color:rgba(114, 46, 209, 0.05);">
+              <th style="border-bottom:2px solid var(--primary); padding:8px 10px;">집단 비교 쌍 (I vs J)</th>
+              <th style="border-bottom:2px solid var(--primary); padding:8px 10px; text-align:center;">평균 차이 (I-J)</th>
+              <th style="border-bottom:2px solid var(--primary); padding:8px 10px; text-align:center;">임계 범위 (LSR)</th>
+              <th style="border-bottom:2px solid var(--primary); padding:8px 10px; text-align:center;">유의 여부 (α=0.05)</th>
+            </tr>
+          </thead>
+          <tbody>
   `;
   anova.postHoc.duncan.forEach(ph => {
     const isSig = ph.isSignificant;
@@ -2545,30 +2547,31 @@ function runAnovaAnalysis() {
       : ph.comparison;
     duncanHtml += `
       <tr class="${isSig ? 'highlight-row' : ''}">
-        <td><strong>${displayComparison}</strong></td>
-        <td>${ph.diff.toFixed(3)}</td>
-        <td>${ph.criticalRange.toFixed(3)}</td>
-        <td><strong style="color:${isSig ? 'var(--primary)' : 'inherit'};">${isSig ? '차이 유의함' : '유의하지 않음'}</strong></td>
+        <td style="padding:8px 10px;"><strong>${displayComparison}</strong></td>
+        <td style="padding:8px 10px; text-align:center;">${ph.diff.toFixed(3)}</td>
+        <td style="padding:8px 10px; text-align:center;">${ph.criticalRange.toFixed(3)}</td>
+        <td style="padding:8px 10px; text-align:center;"><strong style="color:${isSig ? 'var(--primary)' : 'inherit'};">${isSig ? '차이 유의함' : '유의하지 않음'}</strong></td>
       </tr>
     `;
   });
-  duncanHtml += `</tbody></table></div>`;
+  duncanHtml += `</tbody></table></div></div>`;
 
   // 2) Scheffé 사후검정 표
   let scheffeHtml = `
-    <div style="margin-bottom:24px;">
-      <h5 style="margin-bottom:8px; color:var(--primary); font-weight:600;"><i class="fa-solid fa-list-check"></i> Scheffé의 다중 비교 검정</h5>
-      <table class="data-table-result" style="width:100%; font-size:11px;">
-        <thead>
-          <tr style="background-color:rgba(114, 46, 209, 0.03);">
-            <th>집단 비교 쌍 (I vs J)</th>
-            <th>평균 차이 (I-J)</th>
-            <th>임계 차이 (CD)</th>
-            <th>유의확률 (p-value)</th>
-            <th>유의 여부 (α=0.05)</th>
-          </tr>
-        </thead>
-        <tbody>
+    <div style="margin-bottom:28px; border: 1px solid var(--border-glass); border-radius: var(--radius-sm); padding: 18px; background-color: rgba(22, 119, 255, 0.02); box-shadow: var(--shadow-sm);">
+      <h4 style="margin-top:0; margin-bottom:12px; color:var(--info); font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px;"><span style="background-color:var(--info); color:white; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:600;">기법 2</span> Scheffé의 다중 비교 검정</h4>
+      <div class="table-scroll-container" style="margin:0; border:none; background:transparent; max-height:none;">
+        <table class="data-table-result" style="width:100%; font-size:11px; border-collapse:collapse;">
+          <thead>
+            <tr style="background-color:rgba(22, 119, 255, 0.05);">
+              <th style="border-bottom:2px solid var(--info); padding:8px 10px;">집단 비교 쌍 (I vs J)</th>
+              <th style="border-bottom:2px solid var(--info); padding:8px 10px; text-align:center;">평균 차이 (I-J)</th>
+              <th style="border-bottom:2px solid var(--info); padding:8px 10px; text-align:center;">임계 차이 (CD)</th>
+              <th style="border-bottom:2px solid var(--info); padding:8px 10px; text-align:center;">유의확률 (p-value)</th>
+              <th style="border-bottom:2px solid var(--info); padding:8px 10px; text-align:center;">유의 여부 (α=0.05)</th>
+            </tr>
+          </thead>
+          <tbody>
   `;
   anova.postHoc.scheffe.forEach(ph => {
     const isSig = ph.isSignificant;
@@ -2578,31 +2581,32 @@ function runAnovaAnalysis() {
       : ph.comparison;
     scheffeHtml += `
       <tr class="${isSig ? 'highlight-row' : ''}">
-        <td><strong>${displayComparison}</strong></td>
-        <td>${ph.diff.toFixed(3)}</td>
-        <td>${ph.criticalRange.toFixed(3)}</td>
-        <td>${ph.pValue.toFixed(4)}</td>
-        <td><strong style="color:${isSig ? 'var(--primary)' : 'inherit'};">${isSig ? '차이 유의함' : '유의하지 않음'}</strong></td>
+        <td style="padding:8px 10px;"><strong>${displayComparison}</strong></td>
+        <td style="padding:8px 10px; text-align:center;">${ph.diff.toFixed(3)}</td>
+        <td style="padding:8px 10px; text-align:center;">${ph.criticalRange.toFixed(3)}</td>
+        <td style="padding:8px 10px; text-align:center;">${ph.pValue.toFixed(4)}</td>
+        <td style="padding:8px 10px; text-align:center;"><strong style="color:${isSig ? 'var(--primary)' : 'inherit'};">${isSig ? '차이 유의함' : '유의하지 않음'}</strong></td>
       </tr>
     `;
   });
-  scheffeHtml += `</tbody></table></div>`;
+  scheffeHtml += `</tbody></table></div></div>`;
 
   // 3) Tukey-Kramer 사후검정 표
   let tukeyHtml = `
-    <div>
-      <h5 style="margin-bottom:8px; color:var(--primary); font-weight:600;"><i class="fa-solid fa-list-check"></i> Tukey-Kramer (HSD) 다중 비교 검정</h5>
-      <table class="data-table-result" style="width:100%; font-size:11px;">
-        <thead>
-          <tr style="background-color:rgba(114, 46, 209, 0.03);">
-            <th>집단 비교 쌍 (I vs J)</th>
-            <th>평균 차이 (I-J)</th>
-            <th>임계 범위 (HSD)</th>
-            <th>유의확률 (보정 p)</th>
-            <th>유의 여부 (α=0.05)</th>
-          </tr>
-        </thead>
-        <tbody>
+    <div style="border: 1px solid var(--border-glass); border-radius: var(--radius-sm); padding: 18px; background-color: rgba(56, 158, 13, 0.02); box-shadow: var(--shadow-sm);">
+      <h4 style="margin-top:0; margin-bottom:12px; color:var(--success); font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px;"><span style="background-color:var(--success); color:white; padding:2px 8px; border-radius:4px; font-size:10px; font-weight:600;">기법 3</span> Tukey-Kramer (HSD) 다중 비교 검정</h4>
+      <div class="table-scroll-container" style="margin:0; border:none; background:transparent; max-height:none;">
+        <table class="data-table-result" style="width:100%; font-size:11px; border-collapse:collapse;">
+          <thead>
+            <tr style="background-color:rgba(56, 158, 13, 0.05);">
+              <th style="border-bottom:2px solid var(--success); padding:8px 10px;">집단 비교 쌍 (I vs J)</th>
+              <th style="border-bottom:2px solid var(--success); padding:8px 10px; text-align:center;">평균 차이 (I-J)</th>
+              <th style="border-bottom:2px solid var(--success); padding:8px 10px; text-align:center;">임계 범위 (HSD)</th>
+              <th style="border-bottom:2px solid var(--success); padding:8px 10px; text-align:center;">유의확률 (보정 p)</th>
+              <th style="border-bottom:2px solid var(--success); padding:8px 10px; text-align:center;">유의 여부 (α=0.05)</th>
+            </tr>
+          </thead>
+          <tbody>
   `;
   anova.postHoc.tukey.forEach(ph => {
     const isSig = ph.isSignificant;
@@ -2612,15 +2616,15 @@ function runAnovaAnalysis() {
       : ph.comparison;
     tukeyHtml += `
       <tr class="${isSig ? 'highlight-row' : ''}">
-        <td><strong>${displayComparison}</strong></td>
-        <td>${ph.diff.toFixed(3)}</td>
-        <td>${ph.criticalRange.toFixed(3)}</td>
-        <td>${ph.pValue.toFixed(4)}</td>
-        <td><strong style="color:${isSig ? 'var(--primary)' : 'inherit'};">${isSig ? '차이 유의함' : '유의하지 않음'}</strong></td>
+        <td style="padding:8px 10px;"><strong>${displayComparison}</strong></td>
+        <td style="padding:8px 10px; text-align:center;">${ph.diff.toFixed(3)}</td>
+        <td style="padding:8px 10px; text-align:center;">${ph.criticalRange.toFixed(3)}</td>
+        <td style="padding:8px 10px; text-align:center;">${ph.pValue.toFixed(4)}</td>
+        <td style="padding:8px 10px; text-align:center;"><strong style="color:${isSig ? 'var(--primary)' : 'inherit'};">${isSig ? '차이 유의함' : '유의하지 않음'}</strong></td>
       </tr>
     `;
   });
-  tukeyHtml += `</tbody></table></div>`;
+  tukeyHtml += `</tbody></table></div></div>`;
 
   posthocTable.innerHTML = duncanHtml + scheffeHtml + tukeyHtml;
 
@@ -3554,7 +3558,6 @@ function runProbabilityCalculation() {
           pointRadius: 0,
           fill: true,
           backgroundColor: (ctx) => {
-            // 커스텀 영역 색상을 주기 위해 차트 아래에 가공
             return fillColors;
           },
           segment: {
