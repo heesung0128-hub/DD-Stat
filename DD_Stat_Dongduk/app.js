@@ -194,6 +194,11 @@ const AppState = {
   chartInstance: null, // Chart.js 인스턴스
   selectedRows: new Set(), // 삭제용 선택 행 번호
   hypothesis: "",  // 연구 가설
+  inferState: {
+    method: "ci",
+    variables: {},
+    checkedOptions: {}
+  },
   theme: "light",   // 테마: light / dark
   currentPage: 1,   // 현재 페이지 번호
   pageSize: 50      // 한 페이지당 노출할 행 수
@@ -2306,14 +2311,134 @@ function renderDescBivariateContinuousInterpretation(var1, var2) {
   `;
 }
 
+// 추론통계 입력 폼 상태 저장 함수
+function saveInferState() {
+  const methodSelect = document.getElementById("infer-method");
+  if (!methodSelect) return;
+
+  AppState.inferState.method = methodSelect.value;
+
+  const txtHypothesis = document.getElementById("txt-hypothesis");
+  if (txtHypothesis) {
+    AppState.hypothesis = txtHypothesis.value;
+  }
+
+  const container = document.getElementById("infer-variables-container");
+  if (container) {
+    // 모든 select 값 저장
+    const selects = container.querySelectorAll("select");
+    selects.forEach(sel => {
+      AppState.inferState.variables[sel.id] = sel.value;
+    });
+
+    // 모든 input(number 등) 값 저장
+    const inputs = container.querySelectorAll("input[type='number']");
+    inputs.forEach(inp => {
+      AppState.inferState.variables[inp.id] = inp.value;
+    });
+
+    // 모든 checkbox 값 저장
+    const checkboxes = container.querySelectorAll("input[type='checkbox']");
+    checkboxes.forEach(chk => {
+      if (chk.name === "infer-multireg-x") {
+        if (!AppState.inferState.checkedOptions[chk.name]) {
+          AppState.inferState.checkedOptions[chk.name] = [];
+        }
+        if (chk.checked) {
+          if (!AppState.inferState.checkedOptions[chk.name].includes(chk.value)) {
+            AppState.inferState.checkedOptions[chk.name].push(chk.value);
+          }
+        } else {
+          AppState.inferState.checkedOptions[chk.name] = AppState.inferState.checkedOptions[chk.name].filter(v => v !== chk.value);
+        }
+      } else {
+        AppState.inferState.checkedOptions[chk.id] = chk.checked;
+      }
+    });
+  }
+}
+
+// 추론통계 입력 폼 상태 복원 함수
+function restoreInferState() {
+  const methodSelect = document.getElementById("infer-method");
+  if (methodSelect && AppState.inferState.method) {
+    methodSelect.value = AppState.inferState.method;
+  }
+
+  const txtHypothesis = document.getElementById("txt-hypothesis");
+  if (txtHypothesis && AppState.hypothesis !== undefined) {
+    txtHypothesis.value = AppState.hypothesis;
+  }
+
+  const container = document.getElementById("infer-variables-container");
+  if (container) {
+    // select 복원
+    const selects = container.querySelectorAll("select");
+    selects.forEach(sel => {
+      const savedVal = AppState.inferState.variables[sel.id];
+      if (savedVal !== undefined) {
+        const optionExists = Array.from(sel.options).some(opt => opt.value === savedVal);
+        if (optionExists) {
+          sel.value = savedVal;
+        }
+      }
+    });
+
+    // input(number 등) 복원
+    const inputs = container.querySelectorAll("input[type='number']");
+    inputs.forEach(inp => {
+      const savedVal = AppState.inferState.variables[inp.id];
+      if (savedVal !== undefined) {
+        inp.value = savedVal;
+      }
+    });
+
+    // checkbox 복원
+    const checkboxes = container.querySelectorAll("input[type='checkbox']");
+    checkboxes.forEach(chk => {
+      if (chk.name === "infer-multireg-x") {
+        const savedVals = AppState.inferState.checkedOptions[chk.name];
+        if (savedVals && savedVals.includes(chk.value)) {
+          chk.checked = true;
+        }
+      } else {
+        const savedVal = AppState.inferState.checkedOptions[chk.id];
+        if (savedVal !== undefined) {
+          chk.checked = savedVal;
+        }
+      }
+    });
+  }
+}
+
 // --- 추론통계 분석 화면 ---
 function initInferLayout() {
   const methodSelect = document.getElementById("infer-method");
   
-  // 분석 방법 선택에 따라 변수 선택 폼 동적 갱신
-  methodSelect.addEventListener("change", updateInferMethodOptions);
+  if (methodSelect) {
+    methodSelect.addEventListener("change", () => {
+      AppState.inferState.variables = {};
+      AppState.inferState.checkedOptions = {};
+      saveInferState();
+      updateInferMethodOptions();
+    });
+  }
   
-  document.getElementById("btn-run-infer").onclick = runInferentialAnalysis;
+  const runBtn = document.getElementById("btn-run-infer");
+  if (runBtn) {
+    runBtn.onclick = runInferentialAnalysis;
+  }
+
+  const txtHypothesis = document.getElementById("txt-hypothesis");
+  if (txtHypothesis) {
+    txtHypothesis.addEventListener("input", saveInferState);
+  }
+
+  const container = document.getElementById("infer-variables-container");
+  if (container) {
+    container.addEventListener("change", saveInferState);
+    container.addEventListener("input", saveInferState);
+  }
 }
 
 function updateInferMethodOptions() {
@@ -2474,6 +2599,10 @@ function updateInferMethodOptions() {
       `;
       break;
   }
+
+  // 저장된 이전의 폼 값과 가설 복원
+  restoreInferState();
+}
 }
 
 function runInferentialAnalysis() {
