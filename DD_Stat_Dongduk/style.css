@@ -644,6 +644,11 @@ a {
   border-bottom: 1px solid var(--border-glass);
 }
 
+.data-table-result th:first-child, .data-table-result td:first-child {
+  min-width: 140px;
+  word-break: keep-all;
+}
+
 .data-table-result th {
   background-color: var(--bg-app);
   font-weight: 600;
