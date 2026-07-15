@@ -729,6 +729,16 @@ function updateHeaderInfo(tabId) {
       subtitle.textContent = "내 데이터와 궁금증에 딱 맞는 통계 분석법을 찾아봅니다.";
       break;
   }
+
+  // 탭 변경 시 보고서 내보내기 버튼 가시성 동적 제어
+  const exportReportBtn = document.getElementById("btn-export-report");
+  if (exportReportBtn) {
+    if (tabId === "tab-desc" || tabId === "tab-infer") {
+      exportReportBtn.classList.remove("hidden");
+    } else {
+      exportReportBtn.classList.add("hidden");
+    }
+  }
 }
 
 // --- 파일 업로드 (PapaParse & SheetJS 연동) ---
@@ -2602,7 +2612,6 @@ function updateInferMethodOptions() {
 
   // 저장된 이전의 폼 값과 가설 복원
   restoreInferState();
-}
 }
 
 function runInferentialAnalysis() {
