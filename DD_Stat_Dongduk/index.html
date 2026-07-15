@@ -106,6 +106,7 @@
           <p id="current-tab-subtitle">CSV/Excel 파일을 불러오거나 스프레드시트에 직접 데이터를 작성하세요.</p>
         </div>
         <div class="header-actions">
+          <button id="btn-export-report" class="btn btn-success"><i class="fa-solid fa-file-export"></i> 분석 보고서 저장</button>
           <button id="btn-reset-data" class="btn btn-secondary"><i class="fa-solid fa-rotate-left"></i> 데이터 초기화</button>
           <a href="https://github.com" target="_blank" class="help-link"><i class="fa-solid fa-circle-question"></i> 도움말</a>
         </div>
@@ -355,7 +356,7 @@
                   <option value="anova">5. 일원분산분석 (ANOVA, 세 집단 이상 비교)</option>
                   <option value="chisq-ind">6. 교차분석 (카이제곱 독립성 검정)</option>
                   <option value="correlation">7. 피어슨 상관분석 (두 연속변수 간 선형 연관성)</option>
-                  <option value="regression">8. 단순선형회귀분석 (독립변수를 통한 종속변수 예측 - 고급 모드)</option>
+                  <option value="regression">8. 단순선형회귀분석 (독립변수를 통한 종속변수 예측)</option>
                   <option value="multireg">9. 다중선형회귀분석 (복수 독립변수를 통한 종속변수 예측)</option>
                 </select>
               </div>
@@ -605,48 +606,72 @@
                 <h3>Q2. 비교하려는 대상(집단)은 몇 개인가요?</h3>
                 <div class="wizard-options mt-4">
                   <label class="wizard-option-card">
-                    <input type="radio" name="opt-groups" value="2" checked>
+                    <input type="radio" name="opt-groups" value="1" checked>
                     <div class="option-content">
-                      <span class="option-title">2개 집단</span>
-                      <span class="option-desc">예: "남학생 vs 여학생", "실험군 vs 대조군"</span>
+                      <span class="option-title">1개 집단과 특정 기준값 비교</span>
+                      <span class="option-desc">예: "우리 학교 학생들의 평균 키가 전국 평균 키(170cm)와 차이가 있는가?"</span>
+                    </div>
+                  </label>
+
+                  <label class="wizard-option-card">
+                    <input type="radio" name="opt-groups" value="2">
+                    <div class="option-content">
+                      <span class="option-title">서로 다른 2개 집단 비교</span>
+                      <span class="option-desc">예: "남학생의 평균 수학 점수 vs 여학생의 평균 수학 점수"</span>
                     </div>
                   </label>
                   
                   <label class="wizard-option-card">
                     <input type="radio" name="opt-groups" value="3plus">
                     <div class="option-content">
-                      <span class="option-title">3개 집단 이상</span>
-                      <span class="option-desc">예: "1학년 vs 2학년 vs 3학년", "A형 vs B형 vs O형 vs AB형"</span>
+                      <span class="option-title">서로 다른 3개 집단 이상 비교</span>
+                      <span class="option-desc">예: "1학년 vs 2학년 vs 3학년 수면시간 비교", "A형 vs B형 vs O형 vs AB형 선호도"</span>
                     </div>
                   </label>
                   
                   <label class="wizard-option-card">
                     <input type="radio" name="opt-groups" value="paired">
                     <div class="option-content">
-                      <span class="option-title">동일한 집단의 전/후 비교</span>
-                      <span class="option-desc">예: "훈련 프로그램 참가 전 점수 vs 참가 후 점수"</span>
+                      <span class="option-title">동일한 집단의 전/후(사전-사후) 비교</span>
+                      <span class="option-desc">예: "다이어트 약 복용 전 몸무게 vs 복용 후 몸무게 비교"</span>
                     </div>
                   </label>
                 </div>
               </div>
               
-              <!-- STEP 3: 변수 종류 (연관성 선택 시) -->
+              <!-- STEP 3: 변수 종류 및 예측 분석 형태 (연관성 선택 시) -->
               <div class="wizard-step" id="wizard-step-3">
-                <h3>Q2. 변수들은 주로 어떤 형태인가요?</h3>
+                <h3>Q2. 연구하고자 하는 연관성이나 분석의 형태를 선택하세요.</h3>
                 <div class="wizard-options mt-4">
                   <label class="wizard-option-card">
                     <input type="radio" name="opt-var-type" value="continuous" checked>
                     <div class="option-content">
-                      <span class="option-title">둘 다 연속형 수치 (키, 점수, 시간 등)</span>
-                      <span class="option-desc">예: "수면 시간과 성적"의 선형 관계 확인 또는 예측</span>
+                      <span class="option-title">두 변수 간 단순 비례/반비례 연관성 분석</span>
+                      <span class="option-desc">예: "하루 공부 시간과 시험 성적 간에 단순 비례하는 밀접한 관계가 있는가?"</span>
+                    </div>
+                  </label>
+                  
+                  <label class="wizard-option-card">
+                    <input type="radio" name="opt-var-type" value="regression-simple">
+                    <div class="option-content">
+                      <span class="option-title">1개의 요인으로 다른 결과 예측 (단순선형회귀)</span>
+                      <span class="option-desc">예: "하루 공부 시간(원인)이 기말고사 성적(결과)에 미치는 영향력을 인과 분석"</span>
+                    </div>
+                  </label>
+
+                  <label class="wizard-option-card">
+                    <input type="radio" name="opt-var-type" value="regression-multi">
+                    <div class="option-content">
+                      <span class="option-title">여러 개의 요인들로 다른 결과 예측 (다중선형회귀)</span>
+                      <span class="option-desc">예: "sleep_hours, study_hours, commute_time(여러 요인)으로 성적 예측"</span>
                     </div>
                   </label>
                   
                   <label class="wizard-option-card">
                     <input type="radio" name="opt-var-type" value="categorical">
                     <div class="option-content">
-                      <span class="option-title">둘 다 범주형 그룹 (성별, 찬반, 주거 지역 등)</span>
-                      <span class="option-desc">예: "성별(남/여)과 찬반(찬성/반대) 간의 연관성"</span>
+                      <span class="option-title">둘 다 범주형 그룹 (성별, 찬반, 등) 간 교차 분석</span>
+                      <span class="option-desc">예: "학년(1/2/3)에 따른 선호하는 동아리(학술/체육/예술) 비율의 격차 분석"</span>
                     </div>
                   </label>
                 </div>
