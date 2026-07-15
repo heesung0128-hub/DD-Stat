@@ -353,6 +353,225 @@ function exportProjectJSON() {
   }
 }
 
+// 분석 결과 종합 보고서 내보내기 (HTML 포맷)
+function downloadAnalysisReport() {
+  const descPanel = document.getElementById("desc-result-panel");
+  const inferPanel = document.getElementById("infer-result-panel");
+
+  const hasDesc = descPanel && descPanel.innerHTML.trim() !== "";
+  const hasInfer = inferPanel && inferPanel.innerHTML.trim() !== "" && !inferPanel.classList.contains("hidden");
+
+  if (!hasDesc && !hasInfer) {
+    alert("화면에 출력된 통계 분석 결과가 없습니다. 분석을 먼저 수행해 주세요.");
+    return;
+  }
+
+  // 1) 기술통계 결과 복제 및 Canvas 변환
+  let descHtml = "";
+  if (hasDesc) {
+    const clone = descPanel.cloneNode(true);
+    const origCanvases = descPanel.querySelectorAll("canvas");
+    const cloneCanvases = clone.querySelectorAll("canvas");
+    
+    for (let i = 0; i < origCanvases.length; i++) {
+      const origCanvas = origCanvases[i];
+      const cloneCanvas = cloneCanvases[i];
+      try {
+        const dataUrl = origCanvas.toDataURL("image/png");
+        const img = document.createElement("img");
+        img.src = dataUrl;
+        img.style.maxWidth = "100%";
+        img.style.height = "auto";
+        img.style.display = "block";
+        img.style.margin = "15px auto";
+        img.style.borderRadius = "4px";
+        img.style.boxShadow = "0 1px 3px rgba(0,0,0,0.15)";
+        
+        cloneCanvas.parentNode.replaceChild(img, cloneCanvas);
+      } catch (e) {
+        console.error("Canvas export failed: ", e);
+      }
+    }
+    const hiddenStem = clone.querySelector("#stem-leaf-display.hidden");
+    if (hiddenStem) hiddenStem.remove();
+
+    descHtml = clone.innerHTML;
+  }
+
+  // 2) 추론통계 결과 복제 및 Canvas 변환
+  let inferHtml = "";
+  if (hasInfer) {
+    const clone = inferPanel.cloneNode(true);
+    const origCanvases = inferPanel.querySelectorAll("canvas");
+    const cloneCanvases = clone.querySelectorAll("canvas");
+
+    for (let i = 0; i < origCanvases.length; i++) {
+      const origCanvas = origCanvases[i];
+      const cloneCanvas = cloneCanvases[i];
+      try {
+        const dataUrl = origCanvas.toDataURL("image/png");
+        const img = document.createElement("img");
+        img.src = dataUrl;
+        img.style.maxWidth = "100%";
+        img.style.height = "auto";
+        img.style.display = "block";
+        img.style.margin = "15px auto";
+        img.style.borderRadius = "4px";
+        img.style.boxShadow = "0 1px 3px rgba(0,0,0,0.15)";
+        
+        cloneCanvas.parentNode.replaceChild(img, cloneCanvas);
+      } catch (e) {
+        console.error("Canvas export failed: ", e);
+      }
+    }
+    inferHtml = clone.innerHTML;
+  }
+
+  // 3) HTML 템플릿 결합
+  const dateStr = new Date().toLocaleString();
+  const htmlContent = `<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DD-Stat 통계 분석 종합 보고서</title>
+  <style>
+    body {
+      font-family: 'Noto Sans KR', 'Inter', -apple-system, sans-serif;
+      padding: 2rem;
+      color: #2d3748;
+      background-color: #f7fafc;
+      line-height: 1.6;
+    }
+    .report-container {
+      max-width: 900px;
+      margin: 0 auto;
+      background: white;
+      padding: 3rem;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    h1 {
+      text-align: center;
+      color: #722ed1;
+      margin-bottom: 0.5rem;
+      font-size: 2.2rem;
+      border-bottom: 2px solid #722ed1;
+      padding-bottom: 1rem;
+    }
+    h2 {
+      color: #1677ff;
+      margin-top: 3rem;
+      border-left: 5px solid #1677ff;
+      padding-left: 0.8rem;
+      font-size: 1.5rem;
+      background: #e6f7ff;
+      padding-top: 6px;
+      padding-bottom: 6px;
+      border-radius: 0 4px 4px 0;
+    }
+    h3 {
+      color: #2d3748;
+      margin-top: 2rem;
+      font-size: 1.25rem;
+      border-bottom: 1px dashed #e2e8f0;
+      padding-bottom: 0.4rem;
+    }
+    h4 {
+      font-size: 1.1rem;
+      color: #4a5568;
+    }
+    .data-table-result {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1.5rem 0;
+      font-size: 0.85rem;
+    }
+    .data-table-result th, .data-table-result td {
+      padding: 0.6rem 0.8rem;
+      text-align: left;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    .data-table-result th {
+      background-color: #f8fafc;
+      font-weight: 600;
+      color: #4a5568;
+    }
+    .data-table-result th:first-child, .data-table-result td:first-child {
+      min-width: 140px;
+      word-break: keep-all;
+    }
+    .text-center {
+      text-align: center;
+    }
+    .text-danger {
+      color: #cf1322;
+      font-weight: 600;
+    }
+    .text-success {
+      color: #389e0d;
+      font-weight: 600;
+    }
+    .highlight-row td {
+      background-color: #f9f0ff;
+      font-weight: 600;
+    }
+    .chart-wrapper {
+      text-align: center;
+      margin: 2rem 0;
+      background: #fafafa;
+      padding: 1rem;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+    }
+    .interpretation-text {
+      font-size: 0.95rem;
+      line-height: 1.8;
+      background: #faf5ff;
+      padding: 1.2rem;
+      border-radius: 6px;
+      margin-top: 1rem;
+      border-left: 4px solid #722ed1;
+    }
+    .interpretation-text p {
+      margin-bottom: 0.8rem;
+    }
+    .meta-info {
+      font-size: 0.85rem;
+      color: #718096;
+      text-align: right;
+      margin-bottom: 2rem;
+      border-bottom: 1px solid #edf2f7;
+      padding-bottom: 8px;
+    }
+    button, .btn {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="report-container">
+    <h1>📊 DD-Stat 통계 분석 종합 보고서</h1>
+    <div class="meta-info">출력 일시: ${dateStr} | 동덕여자고등학교 수학과 통계 분석 프로그램</div>
+    
+    ${descHtml ? `<h2>📊 1. 기술통계 및 시각화 결과</h2>${descHtml}` : ""}
+    ${inferHtml ? `<h2>🧪 2. 추론통계 가설 검정 결과</h2>${inferHtml}` : ""}
+  </div>
+</body>
+</html>`;
+
+  const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const yyyymmdd = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  a.href = url;
+  a.download = `DD-Stat_분석보고서_${yyyymmdd}.html`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // --- DOM 로드 시 초기화 ---
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
@@ -382,6 +601,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const exportProjBtn = document.getElementById("btn-export-project");
   if (exportProjBtn) {
     exportProjBtn.addEventListener("click", exportProjectJSON);
+  }
+
+  // 분석 결과 종합 보고서 저장 버튼 바인딩
+  const exportReportBtn = document.getElementById("btn-export-report");
+  if (exportReportBtn) {
+    exportReportBtn.addEventListener("click", downloadAnalysisReport);
   }
 });
 
@@ -4577,7 +4802,8 @@ function initWizard() {
           if (step2) step2.classList.remove("active");
           if (step4) step4.classList.add("active");
 
-          if (groups === "2") recommendedMethod = "ind-t";
+          if (groups === "1") recommendedMethod = "one-sample-t";
+          else if (groups === "2") recommendedMethod = "ind-t";
           else if (groups === "3plus") recommendedMethod = "anova";
           else recommendedMethod = "paired-t";
           renderRecommendation();
@@ -4592,6 +4818,8 @@ function initWizard() {
           if (step4) step4.classList.add("active");
 
           if (varType === "continuous") recommendedMethod = "correlation"; // 피어슨 상관분석
+          else if (varType === "regression-simple") recommendedMethod = "regression"; // 단순선형회귀분석
+          else if (varType === "regression-multi") recommendedMethod = "multireg"; // 다중선형회귀분석
           else recommendedMethod = "chisq-ind"; // 교차분석
           renderRecommendation();
         }
@@ -4649,7 +4877,16 @@ function initWizard() {
     const descEl = document.getElementById("rec-analysis-desc");
     const assumptionsEl = document.getElementById("rec-analysis-assumptions");
 
-    if (recommendedMethod === "ind-t") {
+    if (recommendedMethod === "one-sample-t") {
+      if (nameEl) nameEl.textContent = "일표본 t-검정 (One-Sample t-test)";
+      if (descEl) descEl.textContent = "표본 평균과 이미 알려진 모집단의 기준치(예: 전국 평균 키 등)가 통계적으로 유의미하게 다른지 검정합니다.";
+      if (assumptionsEl) {
+        assumptionsEl.innerHTML = `
+          <li>정규성 가정: 분석 대상이 되는 수치형 변수의 데이터 분포가 정규분포를 따라야 합니다.</li>
+          <li>대조군 수치: 비교할 명확한 기준값(모평균 추정치)이 필요합니다.</li>
+        `;
+      }
+    } else if (recommendedMethod === "ind-t") {
       if (nameEl) nameEl.textContent = "독립표본 t-검정 (Independent Samples t-test)";
       if (descEl) descEl.textContent = "성별에 따른 시험 점수 차이처럼, 서로 겹치지 않는 두 집단의 평균값 차이가 우연인지 실제 의미 있는 격차인지 규명합니다.";
       if (assumptionsEl) {
@@ -4685,6 +4922,24 @@ function initWizard() {
         assumptionsEl.innerHTML = `
           <li>선형성 가정: 두 변수 관계가 곡선이 아닌 직선 비례 성향이어야 합니다.</li>
           <li>인과 오용 경고: 상관이 아무리 높아도 한 요인이 다른 쪽의 직접적 원인이라고 단정하면 안 됩니다.</li>
+        `;
+      }
+    } else if (recommendedMethod === "regression") {
+      if (nameEl) nameEl.textContent = "단순선형회귀분석 (Simple Linear Regression)";
+      if (descEl) descEl.textContent = "독립변수 1개가 종속변수 1개에 미치는 선형적 영향력과 인과적 수식 방정식을 도출하고 미래 값을 예측합니다.";
+      if (assumptionsEl) {
+        assumptionsEl.innerHTML = `
+          <li>선형성 가정: 독립변수와 종속변수 간 관계가 곡선이 아닌 직선 형태로 변화해야 합니다.</li>
+          <li>오차항 조건: 잔차들이 서로 독립이고 고르게 분포해 있어야 가설 검정이 유효합니다.</li>
+        `;
+      }
+    } else if (recommendedMethod === "multireg") {
+      if (nameEl) nameEl.textContent = "다중선형회귀분석 (Multiple Linear Regression)";
+      if (descEl) descEl.textContent = "수면 시간, 공부 시간 등 여러 독립변수들이 하나의 결과 성적(종속변수)에 미치는 영향력을 인과 분석하고 예측 방정식을 세웁니다.";
+      if (assumptionsEl) {
+        assumptionsEl.innerHTML = `
+          <li>다중공선성 주의: 독립변수들끼리 강력한 상관이 얽혀 통계가 파괴되지 않게 검증해야 합니다 (VIF 분석 등).</li>
+          <li>가정 사항: 오차항의 독립성, 정규성, 등분산성을 점검합니다.</li>
         `;
       }
     } else if (recommendedMethod === "chisq-ind") {
