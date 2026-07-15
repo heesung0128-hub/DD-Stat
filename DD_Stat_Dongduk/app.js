@@ -2292,7 +2292,7 @@ function runInferentialAnalysis() {
   }
 }
 
-// 1.5) 일표본 t-검정 실행
+// 2) 일표본 t-검정 실행
 function runOneSampleTTestAnalysis() {
   const varName = document.getElementById("infer-select-var").value;
   const testValue = parseFloat(document.getElementById("infer-test-value").value);
