@@ -3,6 +3,93 @@
  * 외부 라이브러리 (jStat, simple-statistics)를 래핑하여 정확한 계산 및 가정을 점검합니다.
  */
 
+// 행렬 연산 유틸 (다중선형회귀분석용)
+const Matrix = {
+  transpose(A) {
+    const r = A.length;
+    const c = A[0].length;
+    const T = [];
+    for (let j = 0; j < c; j++) {
+      T[j] = [];
+      for (let i = 0; i < r; i++) {
+        T[j][i] = A[i][j];
+      }
+    }
+    return T;
+  },
+  multiply(A, B) {
+    const rA = A.length;
+    const cA = A[0].length;
+    const rB = B.length;
+    const cB = B[0].length;
+    if (cA !== rB) throw new Error("Matrix dimensions mismatch");
+    const C = [];
+    for (let i = 0; i < rA; i++) {
+      C[i] = [];
+      for (let j = 0; j < cB; j++) {
+        let sum = 0;
+        for (let k = 0; k < cA; k++) {
+          sum += A[i][k] * B[k][j];
+        }
+        C[i][j] = sum;
+      }
+    }
+    return C;
+  },
+  invert(A) {
+    const n = A.length;
+    const M = [];
+    for (let i = 0; i < n; i++) {
+      M[i] = [];
+      for (let j = 0; j < n; j++) {
+        M[i][j] = A[i][j];
+      }
+      for (let j = 0; j < n; j++) {
+        M[i][j + n] = (i === j) ? 1 : 0;
+      }
+    }
+    // Gauss-Jordan elimination
+    for (let i = 0; i < n; i++) {
+      let maxEl = Math.abs(M[i][i]);
+      let maxRow = i;
+      for (let k = i + 1; k < n; k++) {
+        if (Math.abs(M[k][i]) > maxEl) {
+          maxEl = Math.abs(M[k][i]);
+          maxRow = k;
+        }
+      }
+      if (maxRow !== i) {
+        const temp = M[i];
+        M[i] = M[maxRow];
+        M[maxRow] = temp;
+      }
+      const pivot = M[i][i];
+      if (Math.abs(pivot) < 1e-12) {
+        throw new Error("독립변수 간에 강한 선형관계(다중공선성)가 있거나 표본이 부족하여 역행렬을 계산할 수 없습니다.");
+      }
+      for (let j = i; j < 2 * n; j++) {
+        M[i][j] /= pivot;
+      }
+      for (let k = 0; k < n; k++) {
+        if (k !== i) {
+          const factor = M[k][i];
+          for (let j = i; j < 2 * n; j++) {
+            M[k][j] -= factor * M[i][j];
+          }
+        }
+      }
+    }
+    const Inv = [];
+    for (let i = 0; i < n; i++) {
+      Inv[i] = [];
+      for (let j = 0; j < n; j++) {
+        Inv[i][j] = M[i][j + n];
+      }
+    }
+    return Inv;
+  }
+};
+
 const StatsHelper = {
   // --- 1. 기술 통계량 (Descriptive Statistics) ---
   calculateDescriptive(data) {
@@ -377,7 +464,6 @@ const StatsHelper = {
       groupBInfo: { n: n2, mean: m2, stdDev: statsB.stdDev },
       cohensD: Math.abs(cohensD),
       diff: m1 - m2,
-      command: "independentTTest",
       homoscedasticity,
       equalVariance: {
         tValue: tEqual,
@@ -571,7 +657,6 @@ const StatsHelper = {
       return row[rIndex];
     }
 
-    // Tukey-Kramer
     function getTukeyCriticalValue(numK, df) {
       const table = {
         2:  [8.33, 9.80, 10.88, 11.73, 12.43, 13.03, 13.54, 13.99],
@@ -860,6 +945,7 @@ const StatsHelper = {
     if (n < 3) return { error: "회귀분석을 위해 최소 3개 이상의 유효한 쌍이 필요합니다." };
 
     // regression 계산 (simple-statistics 사용)
+    // ss.linearRegression은 { m: 기울기, b: 절편 } 반환
     const points = validPairsX.map((x, idx) => [x, validPairsY[idx]]);
     const regression = ss.linearRegression(points);
     const slope = regression.m;
@@ -920,5 +1006,136 @@ const StatsHelper = {
       ssRes,
       ssTot
     };
+  },
+
+  multipleLinearRegression(xDataList, yData, xNames) {
+    // xDataList: 2차원 수치 배열, 각 행은 표본 관측치이고, 열은 X 변수들
+    // yData: 1차원 수치 배열 (종속변수 Y)
+    // xNames: X 변수들의 한글 명칭 배열
+    const n = yData.length;
+    const p = xNames.length; 
+    
+    if (n < p + 2) {
+      return { error: `표본 크기(N=${n})가 예측 요인의 개수(${p})에 비해 너무 작습니다. 더 많은 표본이 필요합니다.` };
+    }
+    
+    // X 행렬 구성 (상수항 추가를 위해 첫 번째 열은 1)
+    const X = [];
+    for (let i = 0; i < n; i++) {
+      X[i] = [1];
+      for (let j = 0; j < p; j++) {
+        X[i].push(xDataList[i][j]);
+      }
+    }
+    
+    // Y 열벡터 구성 (n x 1)
+    const Y = yData.map(y => [y]);
+    
+    try {
+      const XT = Matrix.transpose(X);
+      const XTX = Matrix.multiply(XT, X);
+      const XTX_inv = Matrix.invert(XTX);
+      const XTY = Matrix.multiply(XT, Y);
+      const Beta = Matrix.multiply(XTX_inv, XTY); 
+      
+      const coefficients = Beta.map(b => b[0]); // [Intercept, b1, b2, ... bp]
+      
+      // 잔차 제곱합 계산
+      let ssRes = 0;
+      for (let i = 0; i < n; i++) {
+        let pred = coefficients[0];
+        for (let j = 0; j < p; j++) {
+          pred += coefficients[j + 1] * xDataList[i][j];
+        }
+        ssRes += Math.pow(yData[i] - pred, 2);
+      }
+      
+      // 총 제곱합 계산
+      const meanY = yData.reduce((a, b) => a + b, 0) / n;
+      let ssTot = 0;
+      for (let i = 0; i < n; i++) {
+        ssTot += Math.pow(yData[i] - meanY, 2);
+      }
+      
+      const ssReg = ssTot - ssRes;
+      
+      const dfReg = p;
+      const dfRes = n - p - 1;
+      const dfTot = n - 1;
+      
+      const msReg = ssReg / dfReg;
+      const msRes = ssRes / dfRes;
+      
+      const fValue = msRes > 0 ? msReg / msRes : 0;
+      const pValueF = 1 - jStat.centralF.cdf(fValue, dfReg, dfRes);
+      
+      const r2 = ssTot > 0 ? ssReg / ssTot : 0;
+      const adjustedRSquared = 1 - ((1 - r2) * (n - 1)) / (n - p - 1);
+      
+      // 각 독립변수의 표본표준편차 구하기 (표준화계수용)
+      const stdDevY = ss.sampleStandardDeviation(yData);
+      const stdDevXList = [];
+      for (let j = 0; j < p; j++) {
+        const xCol = xDataList.map(row => row[j]);
+        stdDevXList.push(ss.sampleStandardDeviation(xCol));
+      }
+      
+      // 회귀계수들의 표준오차(SE), t값, p값 계산
+      const coeffResults = [];
+      // 1. 상수항 (Intercept)
+      const seIntercept = Math.sqrt(msRes * XTX_inv[0][0]);
+      const tIntercept = seIntercept > 0 ? coefficients[0] / seIntercept : 0;
+      const pIntercept = 2 * (1 - jStat.studentt.cdf(Math.abs(tIntercept), dfRes));
+      coeffResults.push({
+        name: "(상수 - Intercept)",
+        b: coefficients[0],
+        se: seIntercept,
+        beta: null, 
+        tValue: tIntercept,
+        pValue: pIntercept
+      });
+      
+      // 2. 각 독립변수 계수
+      for (let j = 0; j < p; j++) {
+        const idx = j + 1;
+        const bVal = coefficients[idx];
+        const seVal = Math.sqrt(msRes * XTX_inv[idx][idx]);
+        const tVal = seVal > 0 ? bVal / seVal : 0;
+        const pVal = 2 * (1 - jStat.studentt.cdf(Math.abs(tVal), dfRes));
+        
+        // 표준화계수 Beta = B * (stdDevX / stdDevY)
+        const betaVal = stdDevY > 0 ? bVal * (stdDevXList[j] / stdDevY) : 0;
+        
+        coeffResults.push({
+          name: xNames[j],
+          b: bVal,
+          se: seVal,
+          beta: betaVal,
+          tValue: tVal,
+          pValue: pVal
+        });
+      }
+      
+      return {
+        method: "다중선형회귀분석",
+        n,
+        p,
+        rSquared: r2,
+        adjustedRSquared,
+        fValue,
+        pValueF,
+        dfReg,
+        dfRes,
+        dfTot,
+        ssReg,
+        ssRes,
+        ssTot,
+        msReg,
+        msRes,
+        coefficients: coeffResults
+      };
+    } catch (err) {
+      return { error: err.message || "다중회귀분석 연산 중 오류가 발생했습니다." };
+    }
   }
 };
