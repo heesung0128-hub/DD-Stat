@@ -1066,155 +1066,175 @@ function initTableControls() {
 // --- 결측값, 역코딩, 이상치 탐색 도구 ---
 function initPreprocessTools() {
   // 1) 결측치 적용
-  document.getElementById("btn-apply-missing").addEventListener("click", () => {
-    const method = document.getElementById("select-missing-handler").value;
-    if (AppState.data.length === 0) return;
+  const btnApplyMissing = document.getElementById("btn-apply-missing");
+  if (btnApplyMissing) {
+    btnApplyMissing.addEventListener("click", () => {
+      const method = document.getElementById("select-missing-handler").value;
+      if (AppState.data.length === 0) return;
 
-    if (method === "exclude") {
-      AppState.data = AppState.data.filter(row => {
-        return AppState.headers.every(h => !isMissingValue(h, row[h]));
-      });
-    } else if (method === "mean") {
-      AppState.headers.forEach(h => {
-        if (AppState.colTypes[h] === "continuous") {
-          const vals = AppState.data
-            .map(row => parseFloat(row[h]))
-            .filter(v => !isNaN(v) && !isMissingValue(h, v));
-          
-          if (vals.length > 0) {
-            const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-            AppState.data.forEach(row => {
-              if (isMissingValue(h, row[h])) {
-                row[h] = parseFloat(avg.toFixed(3));
-              }
-            });
-          }
-        }
-      });
-    } else if (method === "zero") {
-      AppState.data.forEach(row => {
+      if (method === "exclude") {
+        AppState.data = AppState.data.filter(row => {
+          return AppState.headers.every(h => !isMissingValue(h, row[h]));
+        });
+      } else if (method === "mean") {
         AppState.headers.forEach(h => {
-          if (isMissingValue(h, row[h])) {
-            row[h] = AppState.colTypes[h] === "continuous" ? 0 : "0";
+          if (AppState.colTypes[h] === "continuous") {
+            const vals = AppState.data
+              .map(row => parseFloat(row[h]))
+              .filter(v => !isNaN(v) && !isMissingValue(h, v));
+            
+            if (vals.length > 0) {
+              const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+              AppState.data.forEach(row => {
+                if (isMissingValue(h, row[h])) {
+                  row[h] = parseFloat(avg.toFixed(3));
+                }
+              });
+            }
           }
         });
-      });
-    }
+      } else if (method === "zero") {
+        AppState.data.forEach(row => {
+          AppState.headers.forEach(h => {
+            if (isMissingValue(h, row[h])) {
+              row[h] = AppState.colTypes[h] === "continuous" ? 0 : "0";
+            }
+          });
+        });
+      }
 
-    const totalPages = Math.ceil(AppState.data.length / AppState.pageSize);
-    AppState.currentPage = Math.min(AppState.currentPage, Math.max(1, totalPages));
-    updateDataWorkspace();
-    resetAnalysisVariables();
-    alert("결측치 전처리가 완료되었습니다.");
-  });
+      const totalPages = Math.ceil(AppState.data.length / AppState.pageSize);
+      AppState.currentPage = Math.min(AppState.currentPage, Math.max(1, totalPages));
+      updateDataWorkspace();
+      resetAnalysisVariables();
+      alert("결측치 전처리가 완료되었습니다.");
+    });
+  }
 
   // 역코딩 선택 목록 로드 헬퍼
-  document.getElementById("select-recode-col").addEventListener("focus", (e) => {
-    e.target.innerHTML = `<option value="">변수 선택</option>` + AppState.headers
-      .filter(h => AppState.colTypes[h] === "continuous" || AppState.colTypes[h] === "likert")
-      .map(h => `<option value="${h}">${h}</option>`).join("");
-  });
+  const selectRecodeCol = document.getElementById("select-recode-col");
+  if (selectRecodeCol) {
+    selectRecodeCol.addEventListener("focus", (e) => {
+      e.target.innerHTML = `<option value="">변수 선택</option>` + AppState.headers
+        .filter(h => AppState.colTypes[h] === "continuous" || AppState.colTypes[h] === "likert")
+        .map(h => `<option value="${h}">${h}</option>`).join("");
+    });
+  }
 
   // 2) 역코딩 적용
-  document.getElementById("btn-apply-recode").addEventListener("click", () => {
-    const colName = document.getElementById("select-recode-col").value;
-    const scale = parseInt(document.getElementById("select-recode-scale").value);
+  const btnApplyRecode = document.getElementById("btn-apply-recode");
+  if (btnApplyRecode) {
+    btnApplyRecode.addEventListener("click", () => {
+      const colName = document.getElementById("select-recode-col").value;
+      const scale = parseInt(document.getElementById("select-recode-scale").value);
 
-    if (!colName) {
-      alert("역코딩을 적용할 변수를 선택해 주세요.");
-      return;
-    }
-
-    let count = 0;
-    AppState.data.forEach(row => {
-      const v = parseFloat(row[colName]);
-      if (!isNaN(v) && v >= 1 && v <= scale) {
-        row[colName] = (scale + 1) - v;
-        count++;
+      if (!colName) {
+        alert("역코딩을 적용할 변수를 선택해 주세요.");
+        return;
       }
-    });
 
-    updateDataWorkspace();
-    resetAnalysisVariables();
-    alert(`변수 '${colName}'의 척도(${scale}점 기준) 역코딩이 ${count}개 데이터에 적용되었습니다.`);
-  });
+      let count = 0;
+      AppState.data.forEach(row => {
+        const v = parseFloat(row[colName]);
+        if (!isNaN(v) && v >= 1 && v <= scale) {
+          row[colName] = (scale + 1) - v;
+          count++;
+        }
+      });
+
+      updateDataWorkspace();
+      resetAnalysisVariables();
+      alert(`변수 '${colName}'의 척도(${scale}점 기준) 역코딩이 ${count}개 데이터에 적용되었습니다.`);
+    });
+  }
 
   // 3) 이상치 탐색
   const outlierModal = document.getElementById("outlier-modal");
   const closeOutlier = document.getElementById("btn-close-outlier");
   const confirmOutlier = document.getElementById("btn-confirm-outlier");
+  const btnDetectOutliers = document.getElementById("btn-detect-outliers");
 
-  document.getElementById("btn-detect-outliers").addEventListener("click", () => {
-    if (AppState.data.length === 0) return;
+  if (btnDetectOutliers) {
+    btnDetectOutliers.addEventListener("click", () => {
+      if (AppState.data.length === 0) return;
 
-    // 테이블의 모든 이상치 마킹 초기화
-    AppState.headers.forEach(h => {
-      AppState.data.forEach((r, idx) => {
-        const tr = document.getElementById(`data-tr-${idx}`);
-        if (tr) tr.classList.remove("danger");
+      // 테이블의 모든 이상치 마킹 초기화
+      AppState.headers.forEach(h => {
+        AppState.data.forEach((r, idx) => {
+          const tr = document.getElementById(`data-tr-${idx}`);
+          if (tr) tr.classList.remove("danger");
+        });
       });
-    });
 
-    const outlierReport = [];
-    AppState.headers.forEach(h => {
-      if (AppState.colTypes[h] === "continuous") {
-        const desc = StatsHelper.calculateDescriptive(AppState.data.map(r => r[h]));
-        if (desc && desc.outliers.length > 0) {
-          // 테이블 행 마킹 및 모달 기록
-          AppState.data.forEach((row, idx) => {
-            const v = parseFloat(row[h]);
-            if (!isNaN(v) && (v < desc.lowerBound || v > desc.upperBound)) {
-              const tr = document.getElementById(`data-tr-${idx}`);
-              if (tr) tr.style.backgroundColor = "var(--danger-light)";
-              outlierReport.push({
-                rowNum: idx + 1,
-                variable: h,
-                value: v,
-                reason: v < desc.lowerBound ? `Q1 하한치(${desc.lowerBound.toFixed(2)}) 미만` : `Q3 상한치(${desc.upperBound.toFixed(2)}) 초과`
-              });
-            }
+      const outlierReport = [];
+      AppState.headers.forEach(h => {
+        if (AppState.colTypes[h] === "continuous") {
+          const desc = StatsHelper.calculateDescriptive(AppState.data.map(r => r[h]));
+          if (desc && desc.outliers.length > 0) {
+            // 테이블 행 마킹 및 모달 기록
+            AppState.data.forEach((row, idx) => {
+              const v = parseFloat(row[h]);
+              if (!isNaN(v) && (v < desc.lowerBound || v > desc.upperBound)) {
+                const tr = document.getElementById(`data-tr-${idx}`);
+                if (tr) tr.style.backgroundColor = "var(--danger-light)";
+                outlierReport.push({
+                  rowNum: idx + 1,
+                  variable: h,
+                  value: v,
+                  reason: v < desc.lowerBound ? `Q1 하한치(${desc.lowerBound.toFixed(2)}) 미만` : `Q3 상한치(${desc.upperBound.toFixed(2)}) 초과`
+                });
+              }
+            });
+          }
+        }
+      });
+
+      const listDiv = document.getElementById("outlier-results-list");
+      if (listDiv) {
+        if (outlierReport.length === 0) {
+          listDiv.innerHTML = `<p class="text-center py-4">탐지된 이상치(극단치)가 없습니다. 깨끗한 데이터셋입니다!</p>`;
+        } else {
+          let tableHtml = `
+            <table class="data-table-result mt-2">
+              <thead>
+                <tr><th>행 번호</th><th>변수</th><th>입력값</th><th>판단 기준</th></tr>
+              </thead>
+              <tbody>
+          `;
+          outlierReport.forEach(item => {
+            tableHtml += `
+              <tr>
+                <td><strong>${item.rowNum}행</strong></td>
+                <td>${item.variable}</td>
+                <td class="text-danger"><strong>${item.value}</strong></td>
+                <td>${item.reason}</td>
+              </tr>
+            `;
           });
+          tableHtml += `</tbody></table>`;
+          listDiv.innerHTML = tableHtml;
         }
       }
-    });
 
-    const listDiv = document.getElementById("outlier-results-list");
-    if (outlierReport.length === 0) {
-      listDiv.innerHTML = `<p class="text-center py-4">탐지된 이상치(극단치)가 없습니다. 깨끗한 데이터셋입니다!</p>`;
-    } else {
-      let tableHtml = `
-        <table class="data-table-result mt-2">
-          <thead>
-            <tr><th>행 번호</th><th>변수</th><th>입력값</th><th>판단 기준</th></tr>
-          </thead>
-          <tbody>
-      `;
-      outlierReport.forEach(item => {
-        tableHtml += `
-          <tr>
-            <td><strong>${item.rowNum}행</strong></td>
-            <td>${item.variable}</td>
-            <td class="text-danger"><strong>${item.value}</strong></td>
-            <td>${item.reason}</td>
-          </tr>
-        `;
+      if (outlierModal) {
+        outlierModal.classList.remove("hidden");
+      }
+    });
+  }
+
+  if (closeOutlier && outlierModal) {
+    closeOutlier.addEventListener("click", () => outlierModal.classList.add("hidden"));
+  }
+  if (confirmOutlier && outlierModal) {
+    confirmOutlier.addEventListener("click", () => {
+      outlierModal.classList.add("hidden");
+      // 하이라이팅 초기화
+      AppState.data.forEach((r, idx) => {
+        const tr = document.getElementById(`data-tr-${idx}`);
+        if (tr) tr.style.backgroundColor = "";
       });
-      tableHtml += `</tbody></table>`;
-      listDiv.innerHTML = tableHtml;
-    }
-
-    outlierModal.classList.remove("hidden");
-  });
-
-  closeOutlier.addEventListener("click", () => outlierModal.classList.add("hidden"));
-  confirmOutlier.addEventListener("click", () => {
-    outlierModal.classList.add("hidden");
-    // 하이라이팅 초기화
-    AppState.data.forEach((r, idx) => {
-      const tr = document.getElementById(`data-tr-${idx}`);
-      if (tr) tr.style.backgroundColor = "";
     });
-  });
+  }
 }
 
 // --- 기술통계 및 시각화 화면 ---
