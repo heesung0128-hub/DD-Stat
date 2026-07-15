@@ -349,14 +349,14 @@
                 <label for="infer-method">원하는 분석 검정 선택:</label>
                 <select id="infer-method" class="form-control mt-1">
                   <option value="ci">1. 모평균의 신뢰구간 추정</option>
-                  <option value="one-sample-t">1.5 일표본 t-검정 (표본평균과 기준치 비교)</option>
-                  <option value="ind-t">2. 독립표본 t-검정 (두 집단 평균 비교)</option>
-                  <option value="paired-t">3. 대응표본 t-검정 (동일 집단 사전/사후 비교)</option>
-                  <option value="anova">4. 일원분산분석 (ANOVA, 세 집단 이상 비교)</option>
-                  <option value="chisq-ind">5. 교차분석 (카이제곱 독립성 검정)</option>
-                  <option value="correlation">6. 피어슨 상관분석 (두 연속변수 간 선형 연관성)</option>
-                  <option value="regression">7. 단순선형회귀분석 (독립변수를 통한 종속변수 예측 - 고급 모드)</option>
-                  <option value="multireg">8. 다중선형회귀분석 (복수 독립변수를 통한 종속변수 예측)</option>
+                  <option value="one-sample-t">2. 일표본 t-검정 (표본평균과 기준치 비교)</option>
+                  <option value="ind-t">3. 독립표본 t-검정 (두 집단 평균 비교)</option>
+                  <option value="paired-t">4. 대응표본 t-검정 (동일 집단 사전/사후 비교)</option>
+                  <option value="anova">5. 일원분산분석 (ANOVA, 세 집단 이상 비교)</option>
+                  <option value="chisq-ind">6. 교차분석 (카이제곱 독립성 검정)</option>
+                  <option value="correlation">7. 피어슨 상관분석 (두 연속변수 간 선형 연관성)</option>
+                  <option value="regression">8. 단순선형회귀분석 (독립변수를 통한 종속변수 예측 - 고급 모드)</option>
+                  <option value="multireg">9. 다중선형회귀분석 (복수 독립변수를 통한 종속변수 예측)</option>
                 </select>
               </div>
               
@@ -457,6 +457,7 @@
                 </div>
                 
               </div>
+              
             </div>
             
           </div>
@@ -674,21 +675,40 @@
               
             </div>
             
-            <!-- 위자드 제어 버튼 -->
-            <div class="wizard-footer mt-8 border-top pt-4">
-              <button class="btn btn-secondary" id="btn-wizard-prev" style="visibility: hidden;">이전</button>
+            <div class="wizard-footer mt-8">
+              <button class="btn btn-secondary hidden" id="btn-wizard-prev">이전 단계</button>
               <button class="btn btn-primary" id="btn-wizard-next">다음 단계</button>
-              <button class="btn btn-success hidden" id="btn-wizard-apply">추천 분석 바로 적용하기</button>
+              <button class="btn btn-success hidden" id="btn-wizard-go">추천된 분석 시작하기 <i class="fa-solid fa-circle-chevron-right"></i></button>
             </div>
           </div>
         </section>
         
       </div>
+      
     </main>
     
   </div>
-
-  <!-- JS Scripts -->
+  
+  <!-- 공통 모달: 이상치 경고 및 대화 상자 -->
+  <div id="outlier-modal" class="modal-backdrop hidden">
+    <div class="modal card glass">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-triangle-exclamation text-warning"></i> 이상치 탐색 결과</h3>
+        <button class="btn-close" id="btn-close-outlier"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body">
+        <p class="description">상자그림(Box Plot) 기준($Q1 - 1.5 \times IQR$ 미만이거나 $Q3 + 1.5 \times IQR$ 초과)으로 탐지된 이상치 목록입니다. 극단적이거나 오기입된 데이터인지 점검해 보세요.</p>
+        <div id="outlier-results-list" class="outlier-results-list mt-4">
+          <!-- Javascript 렌더링 -->
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="btn-confirm-outlier">확인</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Script Link -->
   <script src="stats-helper.js"></script>
   <script src="app.js"></script>
 </body>
