@@ -79,6 +79,14 @@ function parseValueLabelsString(col, str) {
   AppState.valueLabels[col] = map;
 }
 
+function getValLabel(col, val) {
+  const strVal = String(val).trim();
+  if (AppState.valueLabels[col] && AppState.valueLabels[col][strVal] !== undefined) {
+    return AppState.valueLabels[col][strVal];
+  }
+  return val;
+}
+
 // --- 결측값 판별 헬퍼 함수 ---
 function isMissingValue(col, val) {
   if (val === "" || val === null || val === undefined) return true;
@@ -159,8 +167,14 @@ document.addEventListener("DOMContentLoaded", () => {
 function initTheme() {
   const btnToggle = document.getElementById("btn-theme-toggle");
   
-  // 시스템 기본값 또는 기존 설정 반영
-  const savedTheme = localStorage.getItem("stats-theme") || "light";
+  // 시스템 기본값 또는 기존 설정 반영 (로컬 file:/// 환경에서의 SecurityError 방지)
+  let savedTheme = "light";
+  try {
+    savedTheme = localStorage.getItem("stats-theme") || "light";
+  } catch (e) {
+    console.warn("localStorage access denied in local file protocol. Defaulting to light theme.");
+  }
+  
   document.documentElement.setAttribute("data-theme", savedTheme);
   AppState.theme = savedTheme;
   updateThemeUI();
@@ -168,7 +182,11 @@ function initTheme() {
   btnToggle.addEventListener("click", () => {
     AppState.theme = AppState.theme === "light" ? "dark" : "light";
     document.documentElement.setAttribute("data-theme", AppState.theme);
-    localStorage.setItem("stats-theme", AppState.theme);
+    try {
+      localStorage.setItem("stats-theme", AppState.theme);
+    } catch (e) {
+      console.warn("localStorage write access denied in local file protocol.");
+    }
     updateThemeUI();
     
     // 그려진 차트가 있다면 색상 갱신을 위해 재렌더링
@@ -1655,12 +1673,10 @@ function drawDescriptiveChart(var1, var2, chartType) {
     stemLeaf.classList.remove("hidden");
 
     // 줄기-잎 알고리즘
-    // 연속형 수치를 소수점 첫째자리까지 버림하고, 십의자리(줄기)와 일의자리(잎)로 구분
     const numericVals = data1.map(v => parseFloat(v)).filter(v => !isNaN(v)).sort((a,b)=>a-b);
     const stemLeafMap = {};
     
     numericVals.forEach(v => {
-      // 10으로 나눈 목(줄기)과 나머지(잎)
       const rounded = Math.round(v);
       const stem = Math.floor(rounded / 10);
       const leaf = rounded % 10;
@@ -1799,9 +1815,6 @@ function updateInferMethodOptions() {
           <label for="infer-select-group">집단 구분 변수 (2개 범주):</label>
           <select id="infer-select-group" class="form-control mt-1">${catOptionsHTML}</select>
           <p class="input-tip mt-1">예: 성별에 따른 성적 비교 시, 수치 변수는 '성적', 집단 변수는 '성별'</p>
-        </div>
-        <div class="form-group mt-3">
-          <label><input type="checkbox" id="infer-chk-equalvar" checked> 등분산성 가정 적용</label>
         </div>
       `;
       break;
@@ -2513,7 +2526,7 @@ function runAnovaAnalysis() {
     <p>집단 변수 <strong>'${groupVar}'</strong>에 의해 나누어진 세 개 이상의 집단 간에 <strong>'${varName}'</strong>의 평균값 차이가 있는지 일원분산분석(One-way ANOVA)을 수행했습니다.</p>
     <p>분석 결과, 집단 간 평균값들의 격차는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (F = ${anova.fValue.toFixed(2)}, p = ${anova.pValue.toFixed(3)}).</p>
     <p>${isSig ? `즉, 집단 간 평균 차이가 단순히 우연히 나타났을 확률이 극히 희박하므로, 세 집단 중 적어도 어느 집단 간에는 유의미한 평균 차이가 존재합니다.` : `즉, 집단 간에 존재하는 차이는 단순 우연 편차 수준으로 볼 수 있어, 모집단에서 평균 차이가 실재한다고 볼 수 없습니다.`}</p>
-    <p>요인의 실질적인 explanation력 크기인 에타제곱(η²)은 <strong>${anova.etaSquared.toFixed(3)}</strong>로, 집단 분류가 전체 변동의 <strong>${(anova.etaSquared * 100).toFixed(1)}%</strong>를 설명하는 <strong>${effectLabel}</strong>에 해당합니다.</p>
+    <p>요인의 실질적인 설명력 크기인 에타제곱(η²)은 <strong>${anova.etaSquared.toFixed(3)}</strong>로, 집단 분류가 전체 변동의 <strong>${(anova.etaSquared * 100).toFixed(1)}%</strong>를 설명하는 <strong>${effectLabel}</strong>에 해당합니다.</p>
     ${isSig && sigGroups.length > 0 ? `<p><strong>[사후검정 결과]</strong> 다중비교 보정을 통해 쌍별 비교를 수행한 결과, <strong>${sigGroups.join(", ")}</strong> 쌍 간에 통계적으로 유의미한 점수 차이가 확인되었습니다.</p>` : ""}
   `;
 
@@ -2704,7 +2717,7 @@ function runChiSquareIndAnalysis() {
   alertBox.style.backgroundColor = "var(--warning-light)";
   alertBox.style.color = "var(--warning)";
   alertBox.style.borderColor = "var(--warning)";
-  alertTxt.textContent = "주의: 카이제곱 연관성 유의는 두 요인이 연계되어 움직인다는 관계(상관)를 말하며, 이것이 한쪽이 다른 한쪽을 바꾸는 '원인 and 결과(인과)'라는 직접적 논거가 되지 않습니다.";
+  alertTxt.textContent = "주의: 카이제곱 연관성 유의는 두 요인이 연계되어 움직인다는 관계(상관)를 말하며, 이것이 한쪽이 다른 한쪽을 바꾸는 '원인과 결과(인과)'라는 직접적 논거가 되지 않습니다.";
 }
 
 // 7) 피어슨 상관분석 실행
@@ -2916,7 +2929,7 @@ function runCorrelationAnalysis() {
 
   interpretation.innerHTML = `
     <p>연속형 수치 변수인 <strong>'${var1}'</strong>와 <strong>'${var2}'</strong> 사이에 일차함수적인 선형 관계가 있는지 피어슨 상관분석을 실시했습니다.</p>
-    <p>분석 결과, 상관계수 r은 <strong>${r.toFixed(3)}</strong>이며, 이 관계는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${corr.tValue.toFixed(2)}, p = ${corr.pValue.toFixed(3)}).</p>
+    <p>분석 결과 도출된 상관계수 r은 <strong>${r.toFixed(3)}</strong>이며, 이 관계는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${corr.tValue.toFixed(2)}, p = ${corr.pValue.toFixed(3)}).</p>
     <p>${isSig ? `즉, 두 변수 사이에는 실제 <strong>${strengthLabel} ${directionLabel}</strong>가 성립합니다.` : `즉, 통계적으로 관측된 관계 수준이 무시할 수 있는 우연 범위 내이므로, 두 변수는 아무 선형 관계를 가지고 있지 않습니다.`}</p>
   `;
 
@@ -3215,7 +3228,7 @@ function runRegressionAnalysis() {
   interpretation.innerHTML = `
     <p>원인(독립변수) <strong>'${var1}'</strong>이(가) 결과(종속변수) <strong>'${var2}'</strong>을(를) 통계적으로 유의미하게 예측하는지 단순선형회귀분석을 적용했습니다.</p>
     <p>분석 결과 도출된 회귀모형은 통계적으로 <strong>${isSig ? "유의미하게 타당합니다" : "유의미한 타당성을 얻지 못했습니다"}</strong> (F = ${reg.fValue.toFixed(2)}, p = ${reg.pValueF.toFixed(3)}).</p>
-    <p>이 모형의 explanation력(결정계수 R²)은 <strong>${reg.rSquared.toFixed(3)}</strong>이며, 이는 독립변수 '${var1}'이 종속변수 '${var2}' 전체 변동의 약 <strong>${(reg.rSquared * 100).toFixed(1)}%</strong>를 설명(예측)해내고 있음을 의미합니다.</p>
+    <p>이 모형의 설명력(결정계수 R²)은 <strong>${reg.rSquared.toFixed(3)}</strong>이며, 이는 독립변수 '${var1}'이 종속변수 '${var2}' 전체 변동의 약 <strong>${(reg.rSquared * 100).toFixed(1)}%</strong>를 설명(예측)해내고 있음을 의미합니다.</p>
     <p>회귀 기울기 값은 <strong>${reg.slope.toFixed(3)}</strong>로 나타나, '${var1}'가 1단위 증가할 때마다 '${var2}'가 약 <strong>${reg.slope.toFixed(2)}</strong>만큼 ${reg.slope > 0 ? '증가' : '감소'}하는 선형 관계가 나타날 것으로 추정됩니다.</p>
   `;
 
@@ -3366,7 +3379,6 @@ function runProbabilityCalculation() {
     }
 
     const pmf = (k) => {
-      // nCr * p^r * (1-p)^(n-r)
       if (k < 0 || k > n) return 0;
       return jStat.binomial.pdf(k, n, p);
     };
@@ -3507,7 +3519,6 @@ function initWizard() {
         step1.classList.remove("active");
         step3.classList.add("active");
       } else {
-        // 비율 확인의 경우 -> 카이제곱 적합도로 고정 추천
         currentStep = 4;
         recommendedMethod = "chisq-fit";
         step1.classList.remove("active");
@@ -3516,7 +3527,6 @@ function initWizard() {
       }
       prevBtn.classList.remove("hidden");
     } else if (currentStep === 2) {
-      // 집단 평균 비교 분기
       const groups = document.querySelector('input[name="opt-groups"]:checked').value;
       currentStep = 4;
       step2.classList.remove("active");
@@ -3527,7 +3537,6 @@ function initWizard() {
       else recommendedMethod = "paired-t";
       renderRecommendation();
     } else if (currentStep === 3) {
-      // 상관/회귀 비교 분기
       const varType = document.querySelector('input[name="opt-var-type"]:checked').value;
       currentStep = 4;
       step3.classList.remove("active");
@@ -3588,16 +3597,15 @@ function initWizard() {
       nameEl.textContent = "독립표본 t-검정 (Independent Samples t-test)";
       descEl.textContent = "성별에 따른 시험 점수 차이처럼, 서로 겹치지 않는 두 집단의 평균값 차이가 우연인지 실제 의미 있는 격차인지 규명합니다.";
       assumptionsEl.innerHTML = `
-        <li>정규성 가정: 각 집단의 데이터가 정규분포를 따릅니다.</li>
-        <li>등분산성 가정: 두 집단의 흩어진 폭(분산)이 유사합니다. (다를 시 Welch의 보정 적용)</li>
-        <li>비모수 대안: 표본이 적거나 정규성이 훼손될 시 'Mann-Whitney U 검정'을 고려합니다.</li>
+        <li>정규성 가정: 각 집단의 데이터가 정규분포를 따른다고 가정할 수 있어야 합니다.</li>
+        <li>등분산성 가정: 두 집단의 흩어진 폭(분산)이 유사해야 합니다. (다를 시 Welch의 보정 적용)</li>
+        <li>르빈의 검정(Levene's Test)을 통해 등분산성 성립 여부를 자동으로 분석해 줍니다.</li>
       `;
     } else if (recommendedMethod === "paired-t") {
       nameEl.textContent = "대응표본 t-검정 (Paired Samples t-test)";
       descEl.textContent = "체중 감량 교육 전과 후의 몸무게처럼, 동일한 대상에 대한 사전/사후 두 값의 변동 차이가 통계적으로 실재하는지 증명합니다.";
       assumptionsEl.innerHTML = `
         <li>정규성 가정: 사전-사후의 '차이값' 분포가 정규성을 만족해야 합니다.</li>
-        <li>비모수 대안: 정규성 위배 시 'Wilcoxon 부호순위 검정'을 대안으로 씁니다.</li>
       `;
     } else if (recommendedMethod === "anova") {
       nameEl.textContent = "일원분산분석 (One-way ANOVA)";
@@ -3605,14 +3613,13 @@ function initWizard() {
       assumptionsEl.innerHTML = `
         <li>다중검정 방지: t-검정을 3번 반복하는 오류를 피하게 해줍니다.</li>
         <li>사후검정(Post-hoc): 차이가 난다면 어떤 집단들끼리 격차가 생겼는지 Tukey HSD 검정 등을 연계 수행합니다.</li>
-        <li>비모수 대안: Kruskal-Wallis H 검정이 있습니다.</li>
       `;
     } else if (recommendedMethod === "correlation") {
       nameEl.textContent = "피어슨 상관분석 (Pearson Correlation)";
-      descEl.textContent = "하루 공부 시간 and 기말고사 성적처럼, 두 연속형 변수가 얼마나 일직선 방향으로 비례하여 밀접하게 연관되어 있는지 평가합니다.";
+      descEl.textContent = "하루 공부 시간과 기말고사 성적처럼, 두 연속형 변수가 얼마나 일직선 방향으로 비례하여 밀접하게 연관되어 있는지 평가합니다.";
       assumptionsEl.innerHTML = `
         <li>선형성 가정: 두 변수 관계가 곡선이 아닌 직선 비례 성향이어야 합니다.</li>
-        <li>인과 오용 경고: 상관이 아무리 높아도 한 요인이 다른 쪽의 직접적 원인이라고 단정하면 안 됩니다.</li>
+        <li>인과 오용 경고: 상관이 아무리 높아도 한 요인이 다른 쪽의 직접적 원인라고 단정하면 안 됩니다.</li>
       `;
     } else if (recommendedMethod === "chisq-fit") {
       nameEl.textContent = "카이제곱 적합도 검정 (Chi-Square Goodness of Fit)";
@@ -3632,11 +3639,9 @@ function initWizard() {
 
   // 추천된 분석으로 강제 탭 이동 및 로드
   goBtn.addEventListener("click", () => {
-    // 추론통계 탭 활성화
     const inferTab = document.querySelector('[data-tab="tab-infer"]');
     inferTab.click();
 
-    // 해당 분석 드롭다운을 추천 기법으로 강제 매칭
     document.getElementById("infer-method").value = recommendedMethod;
     updateInferMethodOptions();
     
@@ -3659,7 +3664,6 @@ copyBtns.forEach(btn => {
     const table = document.getElementById(targetId);
     if (!table) return;
 
-    // 클립보드에 HTML 테이블 복사
     let range = document.createRange();
     range.selectNode(table);
     window.getSelection().removeAllRanges();
@@ -3688,15 +3692,12 @@ function renderPagination() {
 
   const totalPages = Math.ceil(AppState.data.length / AppState.pageSize);
   
-  // 현재 페이지 범위 초과 방지
   if (AppState.currentPage > totalPages) {
     AppState.currentPage = Math.max(1, totalPages);
   }
 
-  // 페이지 및 행 정보 텍스트 표시
   document.getElementById("page-info").textContent = `${AppState.currentPage} / ${totalPages} 페이지 (총 ${AppState.data.length}행)`;
 
-  // 각 버튼 활성/비활성 처리
   document.getElementById("btn-page-first").disabled = AppState.currentPage === 1;
   document.getElementById("btn-page-prev").disabled = AppState.currentPage === 1;
   document.getElementById("btn-page-next").disabled = AppState.currentPage === totalPages;
@@ -3710,7 +3711,7 @@ function initPaginationEvents() {
   const btnLast = document.getElementById("btn-page-last");
   const selectSize = document.getElementById("select-page-size");
 
-  if (!btnFirst) return; // 마크업 안전 확인
+  if (!btnFirst) return;
 
   btnFirst.onclick = () => {
     if (AppState.currentPage > 1) {
