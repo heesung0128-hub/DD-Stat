@@ -557,6 +557,49 @@ const StatsHelper = {
     };
   },
 
+  // 3.X 일표본 t-검정 (One Sample t-test)
+  oneSampleTTest(data, testValue) {
+    const stats = this.calculateDescriptive(data);
+    if (!stats || stats.n < 2) {
+      return { error: "최소 2개 이상의 유효한 데이터가 필요합니다." };
+    }
+
+    const n = stats.n;
+    const mean = stats.mean;
+    const stdDev = stats.stdDev;
+    const se = stdDev / Math.sqrt(n);
+
+    // t 통계량 및 p-value
+    const diff = mean - testValue;
+    const t = se > 0 ? diff / se : 0;
+    const df = n - 1;
+    const pVal = 2 * (1 - jStat.studentt.cdf(Math.abs(t), df));
+
+    // 효과크기 Cohen's d
+    const cohensD = stdDev > 0 ? diff / stdDev : 0;
+
+    // 95% 신뢰구간
+    const tCrit = jStat.studentt.inv(0.975, df);
+    const ciLower = diff - tCrit * se;
+    const ciUpper = diff + tCrit * se;
+
+    return {
+      method: "일표본 t-검정",
+      n,
+      mean,
+      stdDev,
+      se,
+      testValue,
+      diff,
+      tValue: t,
+      df,
+      pValue: pVal,
+      cohensD: Math.abs(cohensD),
+      ciLower,
+      ciUpper
+    };
+  },
+
   // 3.4 일원분산분석 (One-way ANOVA)
   oneWayAnova(groupDataMap) {
     // groupDataMap: { "A": [1,2,3], "B": [4,5], "C": [7,8,9] }
