@@ -690,15 +690,16 @@ a {
 .chart-wrapper {
   position: relative;
   width: 100%;
-  max-height: 350px;
+  max-width: 600px;
+  margin: 0 auto;
   display: flex;
   justify-content: center;
   align-items: center;
 }
 
 .chart-wrapper canvas {
-  width: 100% !important;
-  max-height: 350px !important;
+  max-width: 100% !important;
+  height: auto !important;
 }
 
 .stem-leaf-box {
