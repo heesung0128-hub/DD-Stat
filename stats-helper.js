@@ -377,6 +377,7 @@ const StatsHelper = {
       groupBInfo: { n: n2, mean: m2, stdDev: statsB.stdDev },
       cohensD: Math.abs(cohensD),
       diff: m1 - m2,
+      command: "independentTTest",
       homoscedasticity,
       equalVariance: {
         tValue: tEqual,
@@ -405,11 +406,15 @@ const StatsHelper = {
     if (n < 2) return { error: "최소 2쌍 이상의 데이터가 필요합니다." };
 
     const diffs = [];
+    const cleanPre = [];
+    const cleanPost = [];
     for (let i = 0; i < n; i++) {
       const vPre = parseFloat(preData[i]);
       const vPost = parseFloat(postData[i]);
       if (!isNaN(vPre) && !isNaN(vPost)) {
         diffs.push(vPost - vPre); // 사후 - 사전 차이
+        cleanPre.push(vPre);
+        cleanPost.push(vPost);
       }
     }
 
@@ -436,6 +441,20 @@ const StatsHelper = {
     const ciLower = meanDiff - tCrit * seDiff;
     const ciUpper = meanDiff + tCrit * seDiff;
 
+    // 대응표본 상관관계 계산 (Pearson)
+    let correlation = { r: 0, pValue: 1 };
+    if (actualN >= 3) {
+      const corrResult = this.correlationAnalysis(cleanPre, cleanPost);
+      if (!corrResult.error) {
+        correlation = {
+          r: corrResult.correlationCoefficient,
+          pValue: corrResult.pValue
+        };
+      }
+    } else if (actualN === 2) {
+      correlation = { r: 1.0, pValue: 1.0 };
+    }
+
     return {
       method: "대응표본 t-검정",
       n: actualN,
@@ -447,12 +466,14 @@ const StatsHelper = {
       pValue: pVal,
       cohensD: Math.abs(cohensDz), // 대응표본의 Cohen's dz
       ciLower,
-      ciUpper
+      ciUpper,
+      correlation
     };
   },
 
   // 3.4 일원분산분석 (One-way ANOVA)
   oneWayAnova(groupDataMap) {
+    // groupDataMap: { "A": [1,2,3], "B": [4,5], "C": [7,8,9] }
     const groupNames = Object.keys(groupDataMap);
     const k = groupNames.length;
     if (k < 3) {
@@ -525,10 +546,69 @@ const StatsHelper = {
     // 효과크기 에타제곱 (eta squared)
     const etaSquared = ssTotal > 0 ? ssBetween / ssTotal : 0;
 
-    // --- Tukey HSD 사후검정 구현 ---
-    const postHoc = [];
+    // --- 사후검정 도우미 함수 ---
+    function getDuncanCriticalValue(r, df) {
+      const table = {
+        2:  [6.08, 6.08, 6.08, 6.08, 6.08, 6.08, 6.08, 6.08, 6.08],
+        5:  [3.64, 3.74, 3.79, 3.83, 3.85, 3.86, 3.87, 3.87, 3.87],
+        10: [3.15, 3.30, 3.37, 3.43, 3.46, 3.47, 3.47, 3.47, 3.47],
+        20: [2.95, 3.10, 3.18, 3.25, 3.28, 3.30, 3.31, 3.31, 3.32],
+        30: [2.89, 3.04, 3.12, 3.20, 3.24, 3.26, 3.27, 3.28, 3.29],
+        60: [2.83, 2.98, 3.08, 3.14, 3.18, 3.21, 3.22, 3.24, 3.25],
+        120:[2.80, 2.95, 3.05, 3.12, 3.16, 3.18, 3.20, 3.21, 3.22],
+        9999:[2.77, 2.92, 3.02, 3.09, 3.13, 3.15, 3.17, 3.18, 3.19]
+      };
+      const dfs = [2, 5, 10, 20, 30, 60, 120, 9999];
+      let targetDf = 9999;
+      for (let i = 0; i < dfs.length; i++) {
+        if (df <= dfs[i]) {
+          targetDf = dfs[i];
+          break;
+        }
+      }
+      const row = table[targetDf];
+      const rIndex = Math.min(Math.max(2, r), 10) - 2;
+      return row[rIndex];
+    }
 
-    // 조화평균 표본크기 (Tukey Kramer 용)
+    // Tukey-Kramer
+    function getTukeyCriticalValue(numK, df) {
+      const table = {
+        2:  [8.33, 9.80, 10.88, 11.73, 12.43, 13.03, 13.54, 13.99],
+        5:  [4.60, 5.22, 5.67, 6.03, 6.33, 6.58, 6.80, 6.99],
+        10: [3.88, 4.33, 4.65, 4.91, 5.12, 5.30, 5.46, 5.60],
+        20: [3.58, 3.96, 4.23, 4.45, 4.62, 4.77, 4.90, 5.01],
+        30: [3.49, 3.85, 4.10, 4.30, 4.46, 4.60, 4.72, 4.82],
+        60: [3.40, 3.74, 3.98, 4.16, 4.31, 4.44, 4.55, 4.65],
+        120:[3.36, 3.68, 3.92, 4.10, 4.24, 4.36, 4.47, 4.56],
+        9999:[3.31, 3.63, 3.86, 4.03, 4.17, 4.29, 4.39, 4.47]
+      };
+      const dfs = [2, 5, 10, 20, 30, 60, 120, 9999];
+      let targetDf = 9999;
+      for (let i = 0; i < dfs.length; i++) {
+        if (df <= dfs[i]) {
+          targetDf = dfs[i];
+          break;
+        }
+      }
+      const row = table[targetDf];
+      const kIndex = Math.min(Math.max(3, numK), 10) - 3;
+      return row[kIndex];
+    }
+
+    // 평균 기준 정렬 리스트 생성 (Duncan MRT 용)
+    const sortedGroups = groupNames.map((name, idx) => ({
+      name,
+      mean: groupMeans[idx]
+    })).sort((a, b) => a.mean - b.mean);
+
+    // 사후검정 비교 리스트 생성
+    const duncanPH = [];
+    const scheffePH = [];
+    const tukeyPH = [];
+
+    const fCrit = jStat.centralF.inv(0.95, dfBetween, dfWithin);
+
     for (let i = 0; i < k; i++) {
       for (let j = i + 1; j < k; j++) {
         const nameA = groupNames[i];
@@ -538,24 +618,54 @@ const StatsHelper = {
         const nA = groupNs[i];
         const nB = groupNs[j];
 
-        // Tukey-Kramer Standard Error
-        const se = Math.sqrt((msWithin / 2) * (1 / nA + 1 / nB));
         const diff = meanA - meanB;
-        // q 통계량
-        const qVal = Math.abs(diff) / se;
+        const absDiff = Math.abs(diff);
+        const se = Math.sqrt((msWithin / 2) * (1 / nA + 1 / nB));
 
-        // Bonferroni 보정 Pairwise t-test 병행 계산
+        // 1. Duncan 검정
+        const idxA = sortedGroups.findIndex(g => g.name === nameA);
+        const idxB = sortedGroups.findIndex(g => g.name === nameB);
+        const r = Math.abs(idxA - idxB) + 1;
+        const qDuncan = getDuncanCriticalValue(r, dfWithin);
+        const lsr = qDuncan * se;
+        const isDuncanSig = absDiff > lsr;
+        duncanPH.push({
+          comparison: `${nameA} vs ${nameB}`,
+          diff,
+          criticalRange: lsr,
+          isSignificant: isDuncanSig
+        });
+
+        // 2. Scheffe 검정
+        const cdScheffe = Math.sqrt(2 * dfBetween * fCrit) * se;
+        const isScheffeSig = absDiff > cdScheffe;
+        const fObs = (absDiff * absDiff) / (msWithin * (1 / nA + 1 / nB));
+        const scheffeP = 1 - jStat.centralF.cdf(fObs / dfBetween, dfBetween, dfWithin);
+        scheffePH.push({
+          comparison: `${nameA} vs ${nameB}`,
+          diff,
+          criticalRange: cdScheffe,
+          pValue: scheffeP,
+          isSignificant: isScheffeSig
+        });
+
+        // 3. Tukey-Kramer 검정
+        const qTukey = getTukeyCriticalValue(k, dfWithin);
+        const hsd = qTukey * se;
+        const isTukeySig = absDiff > hsd;
+        
+        // Bonferroni 보정 p값 활용
         const tVal = diff / Math.sqrt(msWithin * (1 / nA + 1 / nB));
         const rawP = 2 * (1 - jStat.studentt.cdf(Math.abs(tVal), dfWithin));
         const numComparisons = (k * (k - 1)) / 2;
         const adjustedP = Math.min(1.0, rawP * numComparisons);
 
-        postHoc.push({
+        tukeyPH.push({
           comparison: `${nameA} vs ${nameB}`,
           diff,
-          qValue: qVal,
-          pValue: adjustedP, // Bonferroni로 통제된 엄격한 사후 검정 p값
-          isSignificant: adjustedP < 0.05
+          criticalRange: hsd,
+          pValue: adjustedP,
+          isSignificant: isTukeySig
         });
       }
     }
@@ -580,12 +690,17 @@ const StatsHelper = {
       pValue,
       etaSquared,
       homoscedasticity,
-      postHoc
+      postHoc: {
+        duncan: duncanPH,
+        scheffe: scheffePH,
+        tukey: tukeyPH
+      }
     };
   },
 
   // 3.5 카이제곱 독립성/적합도 검정 (Chi-Square Test)
   chiSquareTest(observed, expected = null, type = "independence") {
+    // type: "goodness" (적합도) 또는 "independence" (독립성)
     if (type === "goodness") {
       const n = observed.length;
       if (n < 2) return { error: "적합도 검정을 위해 최소 2개 이상의 범주가 필요합니다." };
@@ -593,6 +708,7 @@ const StatsHelper = {
       const totalObs = observed.reduce((a, b) => a + b, 0);
       let expValues = [];
       if (!expected) {
+        // 기본값: 균등 분포
         expValues = Array(n).fill(totalObs / n);
       } else {
         const totalExpProb = expected.reduce((a, b) => a + b, 0);
@@ -622,6 +738,7 @@ const StatsHelper = {
 
     } else {
       // 독립성 검정
+      // observed: 2차원 빈도 배열 [[n11, n12], [n21, n22]]
       const r = observed.length;
       const c = observed[0].length;
       if (r < 2 || c < 2) return { error: "독립성 검정을 위해 최소 2x2 교차표가 필요합니다." };
@@ -742,11 +859,13 @@ const StatsHelper = {
     const n = validPairsX.length;
     if (n < 3) return { error: "회귀분석을 위해 최소 3개 이상의 유효한 쌍이 필요합니다." };
 
+    // regression 계산 (simple-statistics 사용)
     const points = validPairsX.map((x, idx) => [x, validPairsY[idx]]);
     const regression = ss.linearRegression(points);
     const slope = regression.m;
     const intercept = regression.b;
 
+    // ANOVA 및 유의성 검정을 위한 계산
     const meanX = ss.mean(validPairsX);
     const meanY = ss.mean(validPairsY);
 
