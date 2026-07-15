@@ -1555,27 +1555,41 @@ function drawDescriptiveChart(var1, var2, chartType) {
 
     const numBins = Math.ceil(Math.log2(stats.n) + 1);
     const binWidth = stats.range / numBins;
-    const bins = Array(numBins).fill(0);
+    // 정규곡선 꼬리가 바닥(y=0)에 부드럽게 닿도록 앞뒤로 1개씩 가상 빈(padding)을 추가합니다.
+    const extendedNumBins = numBins + 2;
+    const bins = Array(extendedNumBins).fill(0);
     const binLabels = [];
 
+    // 가상 시작 빈
+    const paddingStart = stats.min - binWidth;
+    const paddingEnd = stats.min;
+    binLabels.push(`${paddingStart.toFixed(1)}~${paddingEnd.toFixed(1)}`);
+
+    // 실제 데이터 빈들
     for (let i = 0; i < numBins; i++) {
       const start = stats.min + i * binWidth;
       const end = start + binWidth;
       binLabels.push(`${start.toFixed(1)}~${end.toFixed(1)}`);
     }
 
+    // 가상 끝 빈
+    const paddingLastStart = stats.max;
+    const paddingLastEnd = stats.max + binWidth;
+    binLabels.push(`${paddingLastStart.toFixed(1)}~${paddingLastEnd.toFixed(1)}`);
+
+    // 실제 데이터 매핑 (가상 시작 빈 추가에 따라 idx + 1)
     data1.forEach(v => {
-      let idx = Math.floor((v - stats.min) / binWidth);
-      if (idx >= numBins) idx = numBins - 1; // max값 보정
-      if (idx >= 0) bins[idx]++;
+      let idx = Math.floor((v - stats.min) / binWidth) + 1;
+      if (idx >= extendedNumBins - 1) idx = extendedNumBins - 2;
+      if (idx >= 1) bins[idx]++;
     });
 
-    // 정규곡선 계산 (N * binWidth * PDF)
+    // 정규곡선 계산 (전체 extendedNumBins에 대해 조밀한 PDF 값 산출)
     const normalCurveData = [];
     const mean = stats.mean;
     const stdDev = stats.stdDev;
-    for (let i = 0; i < numBins; i++) {
-      const mid = stats.min + (i + 0.5) * binWidth;
+    for (let i = 0; i < extendedNumBins; i++) {
+      const mid = (stats.min - binWidth) + (i + 0.5) * binWidth;
       let pdfVal = 0;
       if (stdDev > 0) {
         pdfVal = jStat.normal.pdf(mid, mean, stdDev);
@@ -1604,10 +1618,11 @@ function drawDescriptiveChart(var1, var2, chartType) {
             type: "line",
             borderColor: "rgba(255, 77, 79, 0.8)",
             borderWidth: 2,
-            pointRadius: 2,
+            pointRadius: 0, // SPSS 표준 스타일 준수: 곡선의 점 표시 제거
             fill: false,
             tension: 0.4,
-            order: 1
+            order: 1,
+            clip: false // 차트 좌측 경계선 부근에서 곡선이 잘리지 않도록 비활성화
           }
         ]
       },
@@ -2032,6 +2047,7 @@ function renderDescInterpretation(var1, var2) {
         <p>이어서 범주의 고른 분포 형태를 보이며, 총 <strong>${freqs.total}명</strong>의 응답이 정리되었습니다. 보고서의 기초 현황 테이블에 그대로 인용하실 수 있습니다.</p>
       `;
     }
+  } else {
     box.innerHTML = `
       <p>두 범주형 변수인 <strong>'${var1}'</strong>와 <strong>'${var2}'</strong>를 연계하여 다차원 교차표를 도출한 결과입니다.</p>
       <p>각 집단 내에서 상대적인 빈도 패턴을 통해 두 변수 간에 어떠한 연관적 쏠림 경향이 있는지 직관적으로 살필 수 있습니다. 구체적인 연관 유의성을 검증하려면 <strong>3단계 추론통계 분석의 '카이제곱 독립성 검정'</strong>을 이용해 주십시오.</p>
