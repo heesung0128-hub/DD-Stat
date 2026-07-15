@@ -210,26 +210,78 @@ const StatsHelper = {
 
   checkHomoscedasticity(groups) {
     // groups: 각 집단의 숫자 배열들의 배열 [[1,2], [3,4], [5,6]]
-    const activeGroups = groups.filter(g => g && g.length > 1);
-    if (activeGroups.length < 2) return { passed: true, reason: "비교 집단이 부족합니다." };
+    const activeGroups = groups.map(g => g.filter(v => typeof v === "number" && !isNaN(v))).filter(g => g && g.length > 1);
+    if (activeGroups.length < 2) {
+      return { passed: true, fValue: 0, pValue: 1, reason: "비교 집단이 부족합니다.", severity: "success" };
+    }
 
-    const vars = activeGroups.map(g => ss.sampleVariance(g));
-    const stdDevs = activeGroups.map(g => ss.sampleStandardDeviation(g));
+    const k = activeGroups.length;
+    const nList = activeGroups.map(g => g.length);
     
-    const maxVar = Math.max(...vars);
-    const minVar = Math.min(...vars);
-    const ratio = minVar > 0 ? maxVar / minVar : 0;
+    // 각 집단 평균 계산
+    const means = activeGroups.map(g => {
+      const sum = g.reduce((a, b) => a + b, 0);
+      return sum / g.length;
+    });
 
-    // 분산의 최대/최소 비율이 4배 초과(표준편차 비율 2배 초과)이면 등분산성 의심
-    const passed = ratio <= 4.0;
-    
+    // Z_ij = |Y_ij - mean_i| 편차 절대값 변환
+    const zGroups = activeGroups.map((g, i) => g.map(v => Math.abs(v - means[i])));
+
+    // zGroups에 대해 일원분산분석(One-way ANOVA) 수행하여 F값과 p-value 계산
+    let nTotal = 0;
+    let grandSum = 0;
+    const zMeans = [];
+    const zNs = [];
+
+    zGroups.forEach(zg => {
+      const n = zg.length;
+      const sum = zg.reduce((a, b) => a + b, 0);
+      zNs.push(n);
+      zMeans.push(sum / n);
+      nTotal += n;
+      grandSum += sum;
+    });
+
+    const grandMean = grandSum / nTotal;
+
+    // 집단 간 제곱합 (SS Between)
+    let ssBetween = 0;
+    for (let i = 0; i < k; i++) {
+      ssBetween += zNs[i] * Math.pow(zMeans[i] - grandMean, 2);
+    }
+
+    // 전체 제곱합 (SS Total)
+    let ssTotal = 0;
+    zGroups.forEach(zg => {
+      zg.forEach(v => {
+        ssTotal += Math.pow(v - grandMean, 2);
+      });
+    });
+
+    // 집단 내 제곱합 (SS Within)
+    const ssWithin = ssTotal - ssBetween;
+    const dfBetween = k - 1;
+    const dfWithin = nTotal - k;
+
+    const msBetween = ssBetween / dfBetween;
+    const msWithin = ssWithin / dfWithin;
+
+    const fValue = msWithin > 0 ? msBetween / msWithin : 0;
+    // F-분포의 CDF 계산 (jStat 라이브러리 사용)
+    const pValue = 1 - jStat.centralF.cdf(fValue, dfBetween, dfWithin);
+
+    // 유의확률 p-value가 0.05 이상이면 등분산성 가정을 충족함 (차이가 없음)
+    const passed = pValue >= 0.05;
+
     return {
       passed,
-      ratio: ratio.toFixed(2),
-      stdDevs: stdDevs.map(s => s.toFixed(2)),
+      fValue,
+      pValue,
+      dfBetween,
+      dfWithin,
       reason: passed
-        ? `집단 간 분산 비율이 ${ratio.toFixed(2)}배로 4배 이내에 있어 등분산성 가정을 충족합니다.`
-        : `집단 간 분산 비율이 ${ratio.toFixed(2)}배로 4배를 초과하여 등분산성 가정이 위배되었을 수 있습니다. (표준편차 차이가 큽니다)`,
+        ? `르빈의 등분산 검정 결과, 집단 간 분산의 차이가 통계적으로 유의하지 않아 등분산 가정을 충족합니다. (F = ${fValue.toFixed(3)}, p = ${pValue.toFixed(4)} ≥ 0.05)`
+        : `르빈의 등분산 검정 결과, 집단 간 분산의 차이가 유의하여 등분산 가정이 위배되었을 수 있습니다. (F = ${fValue.toFixed(3)}, p = ${pValue.toFixed(4)} < 0.05)`,
       severity: passed ? "success" : "warning"
     };
   },
@@ -293,7 +345,7 @@ const StatsHelper = {
     const v1 = statsA.variance;
     const v2 = statsB.variance;
 
-    // 등분산성 자동 체크도 함께 수행
+    // 등분산성 자동 체크도 함께 수행 (르빈의 등분산성 검정으로 작동)
     const homoscedasticity = this.checkHomoscedasticity([groupA, groupB]);
 
     // 1. 등분산 가정 (Equal Variance Assumed)
@@ -475,12 +527,7 @@ const StatsHelper = {
     const etaSquared = ssTotal > 0 ? ssBetween / ssTotal : 0;
 
     // --- Tukey HSD 사후검정 구현 ---
-    // 모든 집단 간 쌍 비교
     const postHoc = [];
-    const qTable = {
-      // 고등학교용 보수적 Tukey 임계값 q(alpha=0.05) 근사 혹은 Bonferroni 사후 t-검정
-      // Tukey-Kramer의 Pairwise comparison
-    };
 
     // 조화평균 표본크기 (Tukey Kramer 용)
     for (let i = 0; i < k; i++) {
@@ -499,15 +546,11 @@ const StatsHelper = {
         const qVal = Math.abs(diff) / se;
 
         // Bonferroni 보정 Pairwise t-test 병행 계산
-        // 사후 t = (meanA - meanB) / sqrt(msWithin * (1/nA + 1/nB))
         const tVal = diff / Math.sqrt(msWithin * (1 / nA + 1 / nB));
         const rawP = 2 * (1 - jStat.studentt.cdf(Math.abs(tVal), dfWithin));
         const numComparisons = (k * (k - 1)) / 2;
         const adjustedP = Math.min(1.0, rawP * numComparisons);
 
-        // Tukey HSD p-value 근사 (Tukey Studentized Range의 간소화 CDF 근사)
-        // Tukey p-value 근사 공식 (Copenhaver-Holland approximation)
-        // 여기서는 교육적으로 널리 신뢰받는 Bonferroni 수정 p값과 병행하여 유의성을 판정
         postHoc.push({
           comparison: `${nameA} vs ${nameB}`,
           diff,
@@ -544,7 +587,6 @@ const StatsHelper = {
 
   // 3.5 카이제곱 독립성/적합도 검정 (Chi-Square Test)
   chiSquareTest(observed, expected = null, type = "independence") {
-    // type: "goodness" (적합도) 또는 "independence" (독립성)
     if (type === "goodness") {
       const n = observed.length;
       if (n < 2) return { error: "적합도 검정을 위해 최소 2개 이상의 범주가 필요합니다." };
@@ -577,12 +619,11 @@ const StatsHelper = {
         pValue: pVal,
         observed,
         expected: expValues,
-        warning: lowCellPercent > 20 ? "기대빈도가 5 미만인 범주가 20%를 넘지 않아야 근사 계산이 올바릅니다." : null
+        warning: lowCellPercent > 20 ? "기대빈도가 5 미만인 범주가 20%를 초과하여 결과의 신뢰도가 떨어질 수 있습니다." : null
       };
 
     } else {
       // 독립성 검정
-      // observed: 2차원 빈도 배열 [[n11, n12], [n21, n22]]
       const r = observed.length;
       const c = observed[0].length;
       if (r < 2 || c < 2) return { error: "독립성 검정을 위해 최소 2x2 교차표가 필요합니다." };
@@ -703,14 +744,11 @@ const StatsHelper = {
     const n = validPairsX.length;
     if (n < 3) return { error: "회귀분석을 위해 최소 3개 이상의 유효한 쌍이 필요합니다." };
 
-    // regression 계산 (simple-statistics 사용)
-    // ss.linearRegression은 { m: 기울기, b: 절편 } 반환
     const points = validPairsX.map((x, idx) => [x, validPairsY[idx]]);
     const regression = ss.linearRegression(points);
     const slope = regression.m;
     const intercept = regression.b;
 
-    // ANOVA 및 유의성 검정을 위한 계산
     const meanX = ss.mean(validPairsX);
     const meanY = ss.mean(validPairsY);
 
