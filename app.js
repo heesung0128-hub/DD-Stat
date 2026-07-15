@@ -1673,10 +1673,12 @@ function drawDescriptiveChart(var1, var2, chartType) {
     stemLeaf.classList.remove("hidden");
 
     // 줄기-잎 알고리즘
+    // 연속형 수치를 소수점 첫째자리까지 버림하고, 십의자리(줄기)와 일의자리(잎)로 구분
     const numericVals = data1.map(v => parseFloat(v)).filter(v => !isNaN(v)).sort((a,b)=>a-b);
     const stemLeafMap = {};
     
     numericVals.forEach(v => {
+      // 10으로 나눈 목(줄기)과 나머지(잎)
       const rounded = Math.round(v);
       const stem = Math.floor(rounded / 10);
       const leaf = rounded % 10;
@@ -1815,6 +1817,9 @@ function updateInferMethodOptions() {
           <label for="infer-select-group">집단 구분 변수 (2개 범주):</label>
           <select id="infer-select-group" class="form-control mt-1">${catOptionsHTML}</select>
           <p class="input-tip mt-1">예: 성별에 따른 성적 비교 시, 수치 변수는 '성적', 집단 변수는 '성별'</p>
+        </div>
+        <div class="form-group mt-3">
+          <label><input type="checkbox" id="infer-chk-equalvar" checked> 등분산성 가정 적용</label>
         </div>
       `;
       break;
@@ -2281,7 +2286,32 @@ function runPairedTTestAnalysis() {
     </tr>
 
     <tr><td colspan="5" style="padding-top:10px; border:none;"></td></tr>
-    <tr><th colspan="5" style="padding-top:20px;">2. 대응표본 t-검정 결과 상세</th></tr>
+    <tr><th colspan="5" style="padding-top:20px;">2. 대응표본 상관관계 (Paired Samples Correlations)</th></tr>
+    <tr>
+      <td colspan="5" style="padding:0; border:none;">
+        <table class="data-table" style="font-size:12px; width:100%; border-collapse:collapse; margin:0;">
+          <thead>
+            <tr style="background-color:rgba(114, 46, 209, 0.03);">
+              <th style="border:1px solid var(--border-glass); padding:8px;">구분</th>
+              <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">사례 수 (N)</th>
+              <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">상관계수 (Correlation)</th>
+              <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">유의확률 (Sig. 양측)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="border:1px solid var(--border-glass); padding:8px;">대응 1: <strong>${var1}</strong> & <strong>${var2}</strong></td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.n}명</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px; font-weight:bold;">${tResult.correlation.r.toFixed(4)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px; color:${tResult.correlation.pValue < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${tResult.correlation.pValue.toFixed(4)}</strong></td>
+            </tr>
+          </tbody>
+        </table>
+      </td>
+    </tr>
+
+    <tr><td colspan="5" style="padding-top:10px; border:none;"></td></tr>
+    <tr><th colspan="5" style="padding-top:20px;">3. 대응표본 t-검정 결과 상세 (SPSS 표준 양식)</th></tr>
     <tr><td><strong>평균 차이 (사후 - 사전)</strong></td><td colspan="4">${tResult.meanDiff.toFixed(3)}</td></tr>
     <tr><td><strong>차이의 표준오차 (SE)</strong></td><td colspan="4">${tResult.seDiff.toFixed(4)}</td></tr>
     <tr><td><strong>t-통계량 (t)</strong></td><td colspan="4">${tResult.tValue.toFixed(3)} (자유도 df = ${tResult.df})</td></tr>
@@ -2294,11 +2324,17 @@ function runPairedTTestAnalysis() {
   const isSig = tResult.pValue < 0.05;
   const interpretation = document.getElementById("infer-korean-interpretation");
   
+  let effectLabel = "매우 작음";
+  if (tResult.cohensD >= 0.8) effectLabel = "큰 효과 크기(의미 있는 실제적 차이)";
+  else if (tResult.cohensD >= 0.5) effectLabel = "중간 효과 크기";
+  else if (tResult.cohensD >= 0.2) effectLabel = "작은 효과 크기";
+
   interpretation.innerHTML = `
-    <p>동일한 대상을 비교하여 <strong>'${var1}'</strong>(사전)과 <strong>'${var2}'</strong>(사후) 사이에 통계적으로 의미 있는 변화가 나타났는지 대응표본 t-검정을 실시하였습니다.</p>
-    <p>검정 결과, 사전 대비 사후의 평균 변화량은 <strong>${tResult.meanDiff.toFixed(2)}</strong>이며, 이 변화는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${tResult.tValue.toFixed(2)}, p = ${tResult.pValue.toFixed(3)}).</p>
-    <p>${isSig ? `즉, 우연한 점수 요동으로 인해서 이런 수준의 전후 차이가 발생했을 가능성이 극히 낮으므로, 실시한 조치/시간 흐름에 따른 변동 효과가 실재한다고 해석할 수 있습니다.` : `즉, 자연스러운 점수 기복 내에 속하므로 사전과 사후 사이에 실질적인 효과가 나타났다고 판단하기 어렵습니다.`}</p>
-    <p>변화의 실질적 크기를 의미하는 효과크기(Cohen's dz)는 <strong>${tResult.cohensD.toFixed(2)}</strong>로 측정되었습니다.</p>
+    <p>동일한 대상을 기준으로 측정된 <strong>'${var1}'</strong>(사전)와 <strong>'${var2}'</strong>(사후) 간에 유의미한 차이가 있는지 대응표본 t-검정을 수행하였습니다.</p>
+    <p>사전-사후 차이값에 대한 정규성 가정 평가 결과(p = ${normDiff.passed ? '≥ 0.05 충족' : '< 0.05 위배 의심'})를 참조하십시오.</p>
+    <p>분석 결과, 사전 대비 사후 평균 점수 변화량은 <strong>${tResult.meanDiff.toFixed(2)}</strong>이며, 이 변화는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${tResult.tValue.toFixed(2)}, df = ${tResult.df}, p = ${tResult.pValue.toFixed(3)}).</p>
+    <p>${isSig ? `즉, 개입 조치(프로그램)를 거친 후 평균 성적에 실제 유의미한 변동이 발생했다고 증명할 수 있습니다.` : `즉, 우연한 자연 변동 오차 범주 내의 격차이므로, 전후 점수에는 실제 유의미한 변화가 발생하지 않았다고 해석됩니다.`}</p>
+    <p>실제 변화 효과의 상대적 크기(Cohen's dz)는 <strong>${tResult.cohensD.toFixed(2)}</strong>로, <strong>${effectLabel}</strong>에 해당합니다.</p>
   `;
 
   // 5. 경고판
@@ -2454,8 +2490,8 @@ function runAnovaAnalysis() {
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${anova.ssBetween.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${anova.dfBetween}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${msBetween.toFixed(3)}</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;" rowspan="2" style="vertical-align:middle;"><strong>${anova.fValue.toFixed(3)}</strong></td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;" rowspan="2" style="vertical-align:middle; color:${anova.pValue < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${anova.pValue.toFixed(4)}</strong><br><span style="font-size:9px;font-weight:normal;">(${sig})</span></td>
+              <td style="border:1px solid var(--border-glass); text-align:center;" rowspan="2" style="vertical-align:middle;"><strong>${anova.fValue.toFixed(3)}</strong></td>
+              <td style="border:1px solid var(--border-glass); text-align:center;" rowspan="2" style="vertical-align:middle; color:${anova.pValue < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${anova.pValue.toFixed(4)}</strong><br><span style="font-size:9px;font-weight:normal;">(${sig})</span></td>
             </tr>
             <tr>
               <td style="border:1px solid var(--border-glass); padding:8px;"><strong>집단 내 (Within Groups)</strong></td>
@@ -2480,31 +2516,113 @@ function runAnovaAnalysis() {
     <tr><td><strong>효과크기 (η²)</strong></td><td colspan="7"><strong>${anova.etaSquared.toFixed(3)}</strong> (0.01: 작음, 0.06: 중간, 0.14: 큼)</td></tr>
   `;
 
-  // 4. 사후검정 테이블 노출 (Tukey HSD)
+  // 4. 사후검정 테이블 노출 (Duncan, Scheffé, Tukey-Kramer)
   const posthocCard = document.getElementById("anova-posthoc-card");
   posthocCard.classList.remove("hidden");
   
   const posthocTable = document.getElementById("anova-posthoc-table");
-  let posthocHtml = `<tr><th>집단 비교 쌍</th><th>평균 차이</th><th>Tukey q-값</th><th>유의확률 (보정 p)</th><th>유의 여부 (α=0.05)</th></tr>`;
   
-  anova.postHoc.forEach(ph => {
-    const isPhSig = ph.pValue < 0.05;
+  // 1) Duncan 사후검정 표
+  let duncanHtml = `
+    <div style="margin-bottom:24px;">
+      <h5 style="margin-bottom:8px; color:var(--primary); font-weight:600;"><i class="fa-solid fa-list-check"></i> Duncan의 다중 범위 검정 (MRT)</h5>
+      <table class="data-table-result" style="width:100%; font-size:11px;">
+        <thead>
+          <tr style="background-color:rgba(114, 46, 209, 0.03);">
+            <th>집단 비교 쌍 (I vs J)</th>
+            <th>평균 차이 (I-J)</th>
+            <th>임계 범위 (LSR)</th>
+            <th>유의 여부 (α=0.05)</th>
+          </tr>
+        </thead>
+        <tbody>
+  `;
+  anova.postHoc.duncan.forEach(ph => {
+    const isSig = ph.isSignificant;
     const parts = ph.comparison.split(" vs ");
-    let displayComparison = ph.comparison;
-    if (parts.length === 2) {
-      displayComparison = `${getValLabel(groupVar, parts[0])} vs ${getValLabel(groupVar, parts[1])}`;
-    }
-    posthocHtml += `
-      <tr class="${isPhSig ? 'highlight-row' : ''}">
+    const displayComparison = parts.length === 2 
+      ? `${getValLabel(groupVar, parts[0])} vs ${getValLabel(groupVar, parts[1])}`
+      : ph.comparison;
+    duncanHtml += `
+      <tr class="${isSig ? 'highlight-row' : ''}">
         <td><strong>${displayComparison}</strong></td>
         <td>${ph.diff.toFixed(3)}</td>
-        <td>${ph.qValue.toFixed(3)}</td>
-        <td>${ph.pValue.toFixed(4)}</td>
-        <td><strong>${isPhSig ? '차이 유의함' : '유의하지 않음'}</strong></td>
+        <td>${ph.criticalRange.toFixed(3)}</td>
+        <td><strong style="color:${isSig ? 'var(--primary)' : 'inherit'};">${isSig ? '차이 유의함' : '유의하지 않음'}</strong></td>
       </tr>
     `;
   });
-  posthocTable.innerHTML = posthocHtml;
+  duncanHtml += `</tbody></table></div>`;
+
+  // 2) Scheffé 사후검정 표
+  let scheffeHtml = `
+    <div style="margin-bottom:24px;">
+      <h5 style="margin-bottom:8px; color:var(--primary); font-weight:600;"><i class="fa-solid fa-list-check"></i> Scheffé의 다중 비교 검정</h5>
+      <table class="data-table-result" style="width:100%; font-size:11px;">
+        <thead>
+          <tr style="background-color:rgba(114, 46, 209, 0.03);">
+            <th>집단 비교 쌍 (I vs J)</th>
+            <th>평균 차이 (I-J)</th>
+            <th>임계 차이 (CD)</th>
+            <th>유의확률 (p-value)</th>
+            <th>유의 여부 (α=0.05)</th>
+          </tr>
+        </thead>
+        <tbody>
+  `;
+  anova.postHoc.scheffe.forEach(ph => {
+    const isSig = ph.isSignificant;
+    const parts = ph.comparison.split(" vs ");
+    const displayComparison = parts.length === 2 
+      ? `${getValLabel(groupVar, parts[0])} vs ${getValLabel(groupVar, parts[1])}`
+      : ph.comparison;
+    scheffeHtml += `
+      <tr class="${isSig ? 'highlight-row' : ''}">
+        <td><strong>${displayComparison}</strong></td>
+        <td>${ph.diff.toFixed(3)}</td>
+        <td>${ph.criticalRange.toFixed(3)}</td>
+        <td>${ph.pValue.toFixed(4)}</td>
+        <td><strong style="color:${isSig ? 'var(--primary)' : 'inherit'};">${isSig ? '차이 유의함' : '유의하지 않음'}</strong></td>
+      </tr>
+    `;
+  });
+  scheffeHtml += `</tbody></table></div>`;
+
+  // 3) Tukey-Kramer 사후검정 표
+  let tukeyHtml = `
+    <div>
+      <h5 style="margin-bottom:8px; color:var(--primary); font-weight:600;"><i class="fa-solid fa-list-check"></i> Tukey-Kramer (HSD) 다중 비교 검정</h5>
+      <table class="data-table-result" style="width:100%; font-size:11px;">
+        <thead>
+          <tr style="background-color:rgba(114, 46, 209, 0.03);">
+            <th>집단 비교 쌍 (I vs J)</th>
+            <th>평균 차이 (I-J)</th>
+            <th>임계 범위 (HSD)</th>
+            <th>유의확률 (보정 p)</th>
+            <th>유의 여부 (α=0.05)</th>
+          </tr>
+        </thead>
+        <tbody>
+  `;
+  anova.postHoc.tukey.forEach(ph => {
+    const isSig = ph.isSignificant;
+    const parts = ph.comparison.split(" vs ");
+    const displayComparison = parts.length === 2 
+      ? `${getValLabel(groupVar, parts[0])} vs ${getValLabel(groupVar, parts[1])}`
+      : ph.comparison;
+    tukeyHtml += `
+      <tr class="${isSig ? 'highlight-row' : ''}">
+        <td><strong>${displayComparison}</strong></td>
+        <td>${ph.diff.toFixed(3)}</td>
+        <td>${ph.criticalRange.toFixed(3)}</td>
+        <td>${ph.pValue.toFixed(4)}</td>
+        <td><strong style="color:${isSig ? 'var(--primary)' : 'inherit'};">${isSig ? '차이 유의함' : '유의하지 않음'}</strong></td>
+      </tr>
+    `;
+  });
+  tukeyHtml += `</tbody></table></div>`;
+
+  posthocTable.innerHTML = duncanHtml + scheffeHtml + tukeyHtml;
 
   // 5. 한국어 해석
   const isSig = anova.pValue < 0.05;
@@ -2514,7 +2632,7 @@ function runAnovaAnalysis() {
   if (anova.etaSquared >= 0.14) effectLabel = "매우 큰 수준 (집단 간 성향 차이가 매우 강함)";
   else if (anova.etaSquared >= 0.06) effectLabel = "중간 수준";
 
-  let sigGroups = anova.postHoc.filter(p => p.pValue < 0.05).map(p => {
+  let sigGroups = anova.postHoc.tukey.filter(p => p.isSignificant).map(p => {
     const parts = p.comparison.split(" vs ");
     if (parts.length === 2) {
       return `'${getValLabel(groupVar, parts[0])} vs ${getValLabel(groupVar, parts[1])}'`;
@@ -2526,7 +2644,7 @@ function runAnovaAnalysis() {
     <p>집단 변수 <strong>'${groupVar}'</strong>에 의해 나누어진 세 개 이상의 집단 간에 <strong>'${varName}'</strong>의 평균값 차이가 있는지 일원분산분석(One-way ANOVA)을 수행했습니다.</p>
     <p>분석 결과, 집단 간 평균값들의 격차는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (F = ${anova.fValue.toFixed(2)}, p = ${anova.pValue.toFixed(3)}).</p>
     <p>${isSig ? `즉, 집단 간 평균 차이가 단순히 우연히 나타났을 확률이 극히 희박하므로, 세 집단 중 적어도 어느 집단 간에는 유의미한 평균 차이가 존재합니다.` : `즉, 집단 간에 존재하는 차이는 단순 우연 편차 수준으로 볼 수 있어, 모집단에서 평균 차이가 실재한다고 볼 수 없습니다.`}</p>
-    <p>요인의 실질적인 설명력 크기인 에타제곱(η²)은 <strong>${anova.etaSquared.toFixed(3)}</strong>로, 집단 분류가 전체 변동의 <strong>${(anova.etaSquared * 100).toFixed(1)}%</strong>를 설명하는 <strong>${effectLabel}</strong>에 해당합니다.</p>
+    <p>요인의 실질적인 설명력 크기인 에타제곱(η²)은 <strong>${anova.etaSquared.toFixed(3)}</strong>로, 집단 분류가 전체 변동의 <strong>${(anova.etaSquared * 100).toFixed(1)}%</strong>를 설명(예측)해내는 <strong>${effectLabel}</strong>에 해당합니다.</p>
     ${isSig && sigGroups.length > 0 ? `<p><strong>[사후검정 결과]</strong> 다중비교 보정을 통해 쌍별 비교를 수행한 결과, <strong>${sigGroups.join(", ")}</strong> 쌍 간에 통계적으로 유의미한 점수 차이가 확인되었습니다.</p>` : ""}
   `;
 
@@ -2929,7 +3047,7 @@ function runCorrelationAnalysis() {
 
   interpretation.innerHTML = `
     <p>연속형 수치 변수인 <strong>'${var1}'</strong>와 <strong>'${var2}'</strong> 사이에 일차함수적인 선형 관계가 있는지 피어슨 상관분석을 실시했습니다.</p>
-    <p>분석 결과 도출된 상관계수 r은 <strong>${r.toFixed(3)}</strong>이며, 이 관계는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${corr.tValue.toFixed(2)}, p = ${corr.pValue.toFixed(3)}).</p>
+    <p>분석 결과, 상관계수 r은 <strong>${r.toFixed(3)}</strong>이며, 이 관계는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${corr.tValue.toFixed(2)}, p = ${corr.pValue.toFixed(3)}).</p>
     <p>${isSig ? `즉, 두 변수 사이에는 실제 <strong>${strengthLabel} ${directionLabel}</strong>가 성립합니다.` : `즉, 통계적으로 관측된 관계 수준이 무시할 수 있는 우연 범위 내이므로, 두 변수는 아무 선형 관계를 가지고 있지 않습니다.`}</p>
   `;
 
@@ -3075,8 +3193,8 @@ function runRegressionAnalysis() {
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.ssReg.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.dfReg}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${msReg.toFixed(3)}</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;" rowspan="2" style="vertical-align:middle;"><strong>${reg.fValue.toFixed(3)}</strong></td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;" rowspan="2" style="vertical-align:middle; color:${reg.pValueF < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${reg.pValueF.toFixed(4)}</strong><br><span style="font-size:9px;font-weight:normal;">(${sigF})</span></td>
+              <td style="border:1px solid var(--border-glass); text-align:center;" rowspan="2" style="vertical-align:middle;"><strong>${reg.fValue.toFixed(3)}</strong></td>
+              <td style="border:1px solid var(--border-glass); text-align:center;" rowspan="2" style="vertical-align:middle; color:${reg.pValueF < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${reg.pValueF.toFixed(4)}</strong><br><span style="font-size:9px;font-weight:normal;">(${sigF})</span></td>
             </tr>
             <tr>
               <td style="border:1px solid var(--border-glass); padding:8px;"><strong>잔차 (Residual)</strong></td>
@@ -3379,6 +3497,7 @@ function runProbabilityCalculation() {
     }
 
     const pmf = (k) => {
+      // nCr * p^r * (1-p)^(n-r)
       if (k < 0 || k > n) return 0;
       return jStat.binomial.pdf(k, n, p);
     };
@@ -3435,6 +3554,7 @@ function runProbabilityCalculation() {
           pointRadius: 0,
           fill: true,
           backgroundColor: (ctx) => {
+            // 커스텀 영역 색상을 주기 위해 차트 아래에 가공
             return fillColors;
           },
           segment: {
@@ -3519,6 +3639,7 @@ function initWizard() {
         step1.classList.remove("active");
         step3.classList.add("active");
       } else {
+        // 비율 확인의 경우 -> 카이제곱 적합도로 고정 추천
         currentStep = 4;
         recommendedMethod = "chisq-fit";
         step1.classList.remove("active");
@@ -3527,6 +3648,7 @@ function initWizard() {
       }
       prevBtn.classList.remove("hidden");
     } else if (currentStep === 2) {
+      // 집단 평균 비교 분기
       const groups = document.querySelector('input[name="opt-groups"]:checked').value;
       currentStep = 4;
       step2.classList.remove("active");
@@ -3537,6 +3659,7 @@ function initWizard() {
       else recommendedMethod = "paired-t";
       renderRecommendation();
     } else if (currentStep === 3) {
+      // 상관/회귀 비교 분기
       const varType = document.querySelector('input[name="opt-var-type"]:checked').value;
       currentStep = 4;
       step3.classList.remove("active");
@@ -3597,15 +3720,16 @@ function initWizard() {
       nameEl.textContent = "독립표본 t-검정 (Independent Samples t-test)";
       descEl.textContent = "성별에 따른 시험 점수 차이처럼, 서로 겹치지 않는 두 집단의 평균값 차이가 우연인지 실제 의미 있는 격차인지 규명합니다.";
       assumptionsEl.innerHTML = `
-        <li>정규성 가정: 각 집단의 데이터가 정규분포를 따른다고 가정할 수 있어야 합니다.</li>
-        <li>등분산성 가정: 두 집단의 흩어진 폭(분산)이 유사해야 합니다. (다를 시 Welch의 보정 적용)</li>
-        <li>르빈의 검정(Levene's Test)을 통해 등분산성 성립 여부를 자동으로 분석해 줍니다.</li>
+        <li>정규성 가정: 각 집단의 데이터가 정규분포를 따릅니다.</li>
+        <li>등분산성 가정: 두 집단의 흩어진 폭(분산)이 유사합니다. (다를 시 Welch의 보정 적용)</li>
+        <li>비모수 대안: 표본이 적거나 정규성이 훼손될 시 'Mann-Whitney U 검정'을 고려합니다.</li>
       `;
     } else if (recommendedMethod === "paired-t") {
       nameEl.textContent = "대응표본 t-검정 (Paired Samples t-test)";
       descEl.textContent = "체중 감량 교육 전과 후의 몸무게처럼, 동일한 대상에 대한 사전/사후 두 값의 변동 차이가 통계적으로 실재하는지 증명합니다.";
       assumptionsEl.innerHTML = `
         <li>정규성 가정: 사전-사후의 '차이값' 분포가 정규성을 만족해야 합니다.</li>
+        <li>비모수 대안: 정규성 위배 시 'Wilcoxon 부호순위 검정'을 대안으로 씁니다.</li>
       `;
     } else if (recommendedMethod === "anova") {
       nameEl.textContent = "일원분산분석 (One-way ANOVA)";
@@ -3613,13 +3737,14 @@ function initWizard() {
       assumptionsEl.innerHTML = `
         <li>다중검정 방지: t-검정을 3번 반복하는 오류를 피하게 해줍니다.</li>
         <li>사후검정(Post-hoc): 차이가 난다면 어떤 집단들끼리 격차가 생겼는지 Tukey HSD 검정 등을 연계 수행합니다.</li>
+        <li>비모수 대안: Kruskal-Wallis H 검정이 있습니다.</li>
       `;
     } else if (recommendedMethod === "correlation") {
       nameEl.textContent = "피어슨 상관분석 (Pearson Correlation)";
       descEl.textContent = "하루 공부 시간과 기말고사 성적처럼, 두 연속형 변수가 얼마나 일직선 방향으로 비례하여 밀접하게 연관되어 있는지 평가합니다.";
       assumptionsEl.innerHTML = `
         <li>선형성 가정: 두 변수 관계가 곡선이 아닌 직선 비례 성향이어야 합니다.</li>
-        <li>인과 오용 경고: 상관이 아무리 높아도 한 요인이 다른 쪽의 직접적 원인라고 단정하면 안 됩니다.</li>
+        <li>인과 오용 경고: 상관이 아무리 높아도 한 요인이 다른 쪽의 직접적 원인이라고 단정하면 안 됩니다.</li>
       `;
     } else if (recommendedMethod === "chisq-fit") {
       nameEl.textContent = "카이제곱 적합도 검정 (Chi-Square Goodness of Fit)";
@@ -3639,9 +3764,11 @@ function initWizard() {
 
   // 추천된 분석으로 강제 탭 이동 및 로드
   goBtn.addEventListener("click", () => {
+    // 추론통계 탭 활성화
     const inferTab = document.querySelector('[data-tab="tab-infer"]');
     inferTab.click();
 
+    // 해당 분석 드롭다운을 추천 기법으로 강제 매칭
     document.getElementById("infer-method").value = recommendedMethod;
     updateInferMethodOptions();
     
@@ -3664,6 +3791,7 @@ copyBtns.forEach(btn => {
     const table = document.getElementById(targetId);
     if (!table) return;
 
+    // 클립보드에 HTML 테이블 복사
     let range = document.createRange();
     range.selectNode(table);
     window.getSelection().removeAllRanges();
@@ -3692,12 +3820,15 @@ function renderPagination() {
 
   const totalPages = Math.ceil(AppState.data.length / AppState.pageSize);
   
+  // 현재 페이지 범위 초과 방지
   if (AppState.currentPage > totalPages) {
     AppState.currentPage = Math.max(1, totalPages);
   }
 
+  // 페이지 및 행 정보 텍스트 표시
   document.getElementById("page-info").textContent = `${AppState.currentPage} / ${totalPages} 페이지 (총 ${AppState.data.length}행)`;
 
+  // 각 버튼 활성/비활성 처리
   document.getElementById("btn-page-first").disabled = AppState.currentPage === 1;
   document.getElementById("btn-page-prev").disabled = AppState.currentPage === 1;
   document.getElementById("btn-page-next").disabled = AppState.currentPage === totalPages;
@@ -3711,7 +3842,7 @@ function initPaginationEvents() {
   const btnLast = document.getElementById("btn-page-last");
   const selectSize = document.getElementById("select-page-size");
 
-  if (!btnFirst) return;
+  if (!btnFirst) return; // 마크업 안전 확인
 
   btnFirst.onclick = () => {
     if (AppState.currentPage > 1) {
