@@ -360,10 +360,10 @@ function exportProjectJSON() {
 
 // 분석 결과 종합 보고서 내보내기 (HTML 포맷)
 function downloadAnalysisReport() {
-  const descPanel = document.getElementById("desc-result-panel");
-  const inferPanel = document.getElementById("infer-result-panel");
+  const descPanel = document.getElementById("desc-results-content");
+  const inferPanel = document.getElementById("infer-results-content");
 
-  const hasDesc = descPanel && descPanel.innerHTML.trim() !== "";
+  const hasDesc = descPanel && descPanel.innerHTML.trim() !== "" && !descPanel.classList.contains("hidden");
   const hasInfer = inferPanel && inferPanel.innerHTML.trim() !== "" && !inferPanel.classList.contains("hidden");
 
   if (!hasDesc && !hasInfer) {
