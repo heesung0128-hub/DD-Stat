@@ -279,6 +279,11 @@ a {
   padding: 1.5rem;
   box-shadow: var(--shadow-md);
   transition: var(--transition-smooth);
+  /* GPU 하드웨어 가속 레이어 강제 활성화 및 렌더링 지터/떨림 방지 */
+  transform: translate3d(0, 0, 0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  will-change: transform, box-shadow;
 }
 
 .card.glass {
