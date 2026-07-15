@@ -4528,88 +4528,103 @@ function initWizard() {
 
   let recommendedMethod = "ind-t"; // 추천 타겟 변수
 
-  nextBtn.addEventListener("click", () => {
-    const purpose = document.querySelector('input[name="opt-purpose"]:checked').value;
+  if (nextBtn) {
+    nextBtn.addEventListener("click", () => {
+      const purposeInput = document.querySelector('input[name="opt-purpose"]:checked');
+      if (!purposeInput) return;
+      const purpose = purposeInput.value;
 
-    if (currentStep === 1) {
-      if (purpose === "compare") {
-        currentStep = 2; // 집단 수 물어보기로 이동
-        step1.classList.remove("active");
-        step2.classList.add("active");
-      } else if (purpose === "relation") {
-        currentStep = 3; // 변수 형태 물어보기로 이동
-        step1.classList.remove("active");
-        step3.classList.add("active");
-      } else {
-        // 비율 확인의 경우 -> 교차분석 (카이제곱 독립성 검정) 추천
-        currentStep = 4;
-        recommendedMethod = "chisq-ind";
-        step1.classList.remove("active");
-        step4.classList.add("active");
-        renderRecommendation();
+      if (currentStep === 1) {
+        if (purpose === "compare") {
+          currentStep = 2; // 집단 수 물어보기로 이동
+          if (step1) step1.classList.remove("active");
+          if (step2) step2.classList.add("active");
+        } else if (purpose === "relation") {
+          currentStep = 3; // 변수 형태 물어보기로 이동
+          if (step1) step1.classList.remove("active");
+          if (step3) step3.classList.add("active");
+        } else {
+          // 비율 확인의 경우 -> 교차분석 (카이제곱 독립성 검정) 추천
+          currentStep = 4;
+          recommendedMethod = "chisq-ind";
+          if (step1) step1.classList.remove("active");
+          if (step4) step4.classList.add("active");
+          renderRecommendation();
+        }
+        if (prevBtn) prevBtn.classList.remove("hidden");
+      } else if (currentStep === 2) {
+        // 집단 평균 비교 분기
+        const groupsInput = document.querySelector('input[name="opt-groups"]:checked');
+        if (groupsInput) {
+          const groups = groupsInput.value;
+          currentStep = 4;
+          if (step2) step2.classList.remove("active");
+          if (step4) step4.classList.add("active");
+
+          if (groups === "2") recommendedMethod = "ind-t";
+          else if (groups === "3plus") recommendedMethod = "anova";
+          else recommendedMethod = "paired-t";
+          renderRecommendation();
+        }
+      } else if (currentStep === 3) {
+        // 상관/회귀 비교 분기
+        const varTypeInput = document.querySelector('input[name="opt-var-type"]:checked');
+        if (varTypeInput) {
+          const varType = varTypeInput.value;
+          currentStep = 4;
+          if (step3) step3.classList.remove("active");
+          if (step4) step4.classList.add("active");
+
+          if (varType === "continuous") recommendedMethod = "correlation"; // 피어슨 상관분석
+          else recommendedMethod = "chisq-ind"; // 교차분석
+          renderRecommendation();
+        }
       }
-      prevBtn.classList.remove("hidden");
-    } else if (currentStep === 2) {
-      // 집단 평균 비교 분기
-      const groups = document.querySelector('input[name="opt-groups"]:checked').value;
-      currentStep = 4;
-      step2.classList.remove("active");
-      step4.classList.add("active");
 
-      if (groups === "2") recommendedMethod = "ind-t";
-      else if (groups === "3plus") recommendedMethod = "anova";
-      else recommendedMethod = "paired-t";
-      renderRecommendation();
-    } else if (currentStep === 3) {
-      // 상관/회귀 비교 분기
-      const varType = document.querySelector('input[name="opt-var-type"]:checked').value;
-      currentStep = 4;
-      step3.classList.remove("active");
-      step4.classList.add("active");
+      updateWizardProgress();
+    });
+  }
 
-      if (varType === "continuous") recommendedMethod = "correlation"; // 피어슨 상관분석
-      else recommendedMethod = "chisq-ind"; // 교차분석
-      renderRecommendation();
-    }
-
-    updateWizardProgress();
-  });
-
-  prevBtn.addEventListener("click", () => {
-    if (currentStep === 2 || currentStep === 3) {
-      step2.classList.remove("active");
-      step3.classList.remove("active");
-      step1.classList.add("active");
-      currentStep = 1;
-      prevBtn.classList.add("hidden");
-    } else if (currentStep === 4) {
-      const purpose = document.querySelector('input[name="opt-purpose"]:checked').value;
-      step4.classList.remove("active");
-      if (purpose === "compare") {
-        step2.classList.add("active");
-        currentStep = 2;
-      } else if (purpose === "relation") {
-        step3.classList.add("active");
-        currentStep = 3;
-      } else {
-        step1.classList.add("active");
+  if (prevBtn) {
+    prevBtn.addEventListener("click", () => {
+      if (currentStep === 2 || currentStep === 3) {
+        if (step2) step2.classList.remove("active");
+        if (step3) step3.classList.remove("active");
+        if (step1) step1.classList.add("active");
         currentStep = 1;
         prevBtn.classList.add("hidden");
+      } else if (currentStep === 4) {
+        const purposeInput = document.querySelector('input[name="opt-purpose"]:checked');
+        if (purposeInput) {
+          const purpose = purposeInput.value;
+          if (step4) step4.classList.remove("active");
+          if (purpose === "compare") {
+            if (step2) step2.classList.add("active");
+            currentStep = 2;
+          } else if (purpose === "relation") {
+            if (step3) step3.classList.add("active");
+            currentStep = 3;
+          } else {
+            if (step1) step1.classList.add("active");
+            currentStep = 1;
+            prevBtn.classList.add("hidden");
+          }
+        }
       }
-    }
-    updateWizardProgress();
-  });
+      updateWizardProgress();
+    });
+  }
 
   function updateWizardProgress() {
     const pct = currentStep === 1 ? 25 : currentStep === 2 || currentStep === 3 ? 60 : 100;
-    progressBar.style.width = `${pct}%`;
+    if (progressBar) progressBar.style.width = `${pct}%`;
 
     if (currentStep === 4) {
-      nextBtn.classList.add("hidden");
-      goBtn.classList.remove("hidden");
+      if (nextBtn) nextBtn.classList.add("hidden");
+      if (goBtn) goBtn.classList.remove("hidden");
     } else {
-      nextBtn.classList.remove("hidden");
-      goBtn.classList.add("hidden");
+      if (nextBtn) nextBtn.classList.remove("hidden");
+      if (goBtn) goBtn.classList.add("hidden");
     }
   }
 
@@ -4619,64 +4634,79 @@ function initWizard() {
     const assumptionsEl = document.getElementById("rec-analysis-assumptions");
 
     if (recommendedMethod === "ind-t") {
-      nameEl.textContent = "독립표본 t-검정 (Independent Samples t-test)";
-      descEl.textContent = "성별에 따른 시험 점수 차이처럼, 서로 겹치지 않는 두 집단의 평균값 차이가 우연인지 실제 의미 있는 격차인지 규명합니다.";
-      assumptionsEl.innerHTML = `
-        <li>정규성 가정: 각 집단의 데이터가 정규분포를 따릅니다.</li>
-        <li>등분산성 가정: 두 집단의 흩어진 폭(분산)이 유사합니다. (다를 시 Welch의 보정 적용)</li>
-        <li>비모수 대안: 표본이 적거나 정규성이 훼손될 시 'Mann-Whitney U 검정'을 고려합니다.</li>
-      `;
+      if (nameEl) nameEl.textContent = "독립표본 t-검정 (Independent Samples t-test)";
+      if (descEl) descEl.textContent = "성별에 따른 시험 점수 차이처럼, 서로 겹치지 않는 두 집단의 평균값 차이가 우연인지 실제 의미 있는 격차인지 규명합니다.";
+      if (assumptionsEl) {
+        assumptionsEl.innerHTML = `
+          <li>정규성 가정: 각 집단의 데이터가 정규분포를 따릅니다.</li>
+          <li>등분산성 가정: 두 집단의 흩어진 폭(분산)이 유사합니다. (다를 시 Welch의 보정 적용)</li>
+          <li>비모수 대안: 표본이 적거나 정규성이 훼손될 시 'Mann-Whitney U 검정'을 고려합니다.</li>
+        `;
+      }
     } else if (recommendedMethod === "paired-t") {
-      nameEl.textContent = "대응표본 t-검정 (Paired Samples t-test)";
-      descEl.textContent = "체중 감량 교육 전과 후의 몸무게처럼, 동일한 대상에 대한 사전/사후 두 값의 변동 차이가 통계적으로 실재하는지 증명합니다.";
-      assumptionsEl.innerHTML = `
-        <li>정규성 가정: 사전-사후의 '차이값' 분포가 정규성을 만족해야 합니다.</li>
-        <li>비모수 대안: 정규성 위배 시 'Wilcoxon 부호순위 검정'을 대안으로 씁니다.</li>
-      `;
+      if (nameEl) nameEl.textContent = "대응표본 t-검정 (Paired Samples t-test)";
+      if (descEl) descEl.textContent = "체중 감량 교육 전과 후의 몸무게처럼, 동일한 대상에 대한 사전/사후 두 값의 변동 차이가 통계적으로 실재하는지 증명합니다.";
+      if (assumptionsEl) {
+        assumptionsEl.innerHTML = `
+          <li>정규성 가정: 사전-사후의 '차이값' 분포가 정규성을 만족해야 합니다.</li>
+          <li>비모수 대안: 정규성 위배 시 'Wilcoxon 부호순위 검정'을 대안으로 씁니다.</li>
+        `;
+      }
     } else if (recommendedMethod === "anova") {
-      nameEl.textContent = "일원분산분석 (One-way ANOVA)";
-      descEl.textContent = "학년(1학년 vs 2학년 vs 3학년)에 따른 수면 평균처럼, 3개 이상 다중 집단의 평균들이 유의하게 다른지 한 번에 비교합니다.";
-      assumptionsEl.innerHTML = `
-        <li>다중검정 방지: t-검정을 3번 반복하는 오류를 피하게 해줍니다.</li>
-        <li>사후검정(Post-hoc): 차이가 난다면 어떤 집단들끼리 격차가 생겼는지 Tukey HSD 검정 등을 연계 수행합니다.</li>
-        <li>비모수 대안: Kruskal-Wallis H 검정이 있습니다.</li>
-      `;
+      if (nameEl) nameEl.textContent = "일원분산분석 (One-way ANOVA)";
+      if (descEl) descEl.textContent = "학년(1학년 vs 2학년 vs 3학년)에 따른 수면 평균처럼, 3개 이상 다중 집단의 평균들이 유의하게 다른지 한 번에 비교합니다.";
+      if (assumptionsEl) {
+        assumptionsEl.innerHTML = `
+          <li>다중검정 방지: t-검정을 3번 반복하는 오류를 피하게 해줍니다.</li>
+          <li>사후검정(Post-hoc): 차이가 난다면 어떤 집단들끼리 격차가 생겼는지 Tukey HSD 검정 등을 연계 수행합니다.</li>
+          <li>비모수 대안: Kruskal-Wallis H 검정이 있습니다.</li>
+        `;
+      }
     } else if (recommendedMethod === "correlation") {
-      nameEl.textContent = "피어슨 상관분석 (Pearson Correlation)";
-      descEl.textContent = "하루 공부 시간과 기말고사 성적처럼, 두 연속형 변수가 얼마나 일직선 방향으로 비례하여 밀접하게 연관되어 있는지 평가합니다.";
-      assumptionsEl.innerHTML = `
-        <li>선형성 가정: 두 변수 관계가 곡선이 아닌 직선 비례 성향이어야 합니다.</li>
-        <li>인과 오용 경고: 상관이 아무리 높아도 한 요인이 다른 쪽의 직접적 원인이라고 단정하면 안 됩니다.</li>
-      `;
+      if (nameEl) nameEl.textContent = "피어슨 상관분석 (Pearson Correlation)";
+      if (descEl) descEl.textContent = "하루 공부 시간과 기말고사 성적처럼, 두 연속형 변수가 얼마나 일직선 방향으로 비례하여 밀접하게 연관되어 있는지 평가합니다.";
+      if (assumptionsEl) {
+        assumptionsEl.innerHTML = `
+          <li>선형성 가정: 두 변수 관계가 곡선이 아닌 직선 비례 성향이어야 합니다.</li>
+          <li>인과 오용 경고: 상관이 아무리 높아도 한 요인이 다른 쪽의 직접적 원인이라고 단정하면 안 됩니다.</li>
+        `;
+      }
     } else if (recommendedMethod === "chisq-ind") {
-      nameEl.textContent = "교차분석 (카이제곱 독립성 검정)";
-      descEl.textContent = "성별(남/여)에 따른 선호 급식(양식/일식) 비율처럼, 두 범주형 변수의 결합 빈도 격차와 요인 간 상관관계를 규명합니다.";
-      assumptionsEl.innerHTML = `
-        <li>비교 데이터: 두 변수의 교차 분할표를 사용하여 계산합니다.</li>
-        <li>기대빈도 조건: 5 미만인 셀이 20%를 초과할 시 피셔의 정확검정이나 데이터 병합을 권합니다.</li>
-      `;
+      if (nameEl) nameEl.textContent = "교차분석 (카이제곱 독립성 검정)";
+      if (descEl) descEl.textContent = "성별(남/여)에 따른 선호 급식(양식/일식) 비율처럼, 두 범주형 변수의 결합 빈도 격차와 요인 간 상관관계를 규명합니다.";
+      if (assumptionsEl) {
+        assumptionsEl.innerHTML = `
+          <li>비교 데이터: 두 변수의 교차 분할표를 사용하여 계산합니다.</li>
+          <li>기대빈도 조건: 5 미만인 셀이 20%를 초과할 시 피셔의 정확검정이나 데이터 병합을 권합니다.</li>
+        `;
+      }
     }
   }
 
   // 추천된 분석으로 강제 탭 이동 및 로드
-  goBtn.addEventListener("click", () => {
-    // 추론통계 탭 활성화
-    const inferTab = document.querySelector('[data-tab="tab-infer"]');
-    inferTab.click();
+  if (goBtn) {
+    goBtn.addEventListener("click", () => {
+      // 추론통계 탭 활성화
+      const inferTab = document.querySelector('[data-tab="tab-infer"]');
+      if (inferTab) inferTab.click();
 
-    // 해당 분석 드롭다운을 추천 기법으로 강제 매칭
-    document.getElementById("infer-method").value = recommendedMethod;
-    updateInferMethodOptions();
-    
-    // 원래 단계로 리셋
-    step4.classList.remove("active");
-    step1.classList.add("active");
-    prevBtn.classList.add("hidden");
-    goBtn.classList.add("hidden");
-    nextBtn.classList.remove("hidden");
-    currentStep = 1;
-    progressBar.style.width = "25%";
-  });
+      // 해당 분석 드롭다운을 추천 기법으로 강제 매칭
+      const inferMethodSelect = document.getElementById("infer-method");
+      if (inferMethodSelect) {
+        inferMethodSelect.value = recommendedMethod;
+        updateInferMethodOptions();
+      }
+      
+      // 원래 단계로 리셋
+      if (step4) step4.classList.remove("active");
+      if (step1) step1.classList.add("active");
+      if (prevBtn) prevBtn.classList.add("hidden");
+      if (goBtn) goBtn.classList.add("hidden");
+      if (nextBtn) nextBtn.classList.remove("hidden");
+      currentStep = 1;
+      if (progressBar) progressBar.style.width = "25%";
+    });
+  }
 }
 
 // --- 공통 유틸리티: 표 복사 기능 ---
