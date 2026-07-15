@@ -175,6 +175,37 @@ function downloadCurrentData() {
   XLSX.writeFile(wb, "DD_Stat_Data_Export.xlsx");
 }
 
+// --- 연구 프로젝트 저장 (JSON) ---
+function exportProjectJSON() {
+  if (AppState.data.length === 0) {
+    alert("저장할 프로젝트 데이터가 없습니다. 먼저 데이터를 업로드하거나 작성해 주십시오.");
+    return;
+  }
+
+  const projectObj = {
+    app: "DD_Stat",
+    version: "1.0",
+    headers: AppState.headers,
+    colTypes: AppState.colTypes,
+    valueLabels: AppState.valueLabels,
+    missingRules: AppState.missingRules || {},
+    data: AppState.data
+  };
+
+  try {
+    const jsonString = JSON.stringify(projectObj, null, 2);
+    const blob = new Blob([jsonString], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "DD_Stat_Project_Backup.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert("프로젝트 JSON 생성 중 오류가 발생했습니다: " + err.message);
+  }
+}
+
 // --- DOM 로드 시 초기화 ---
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
@@ -198,6 +229,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const exportBtn = document.getElementById("btn-download-data");
   if (exportBtn) {
     exportBtn.addEventListener("click", downloadCurrentData);
+  }
+
+  // 프로젝트 JSON 백업 내보내기 버튼 바인딩
+  const exportProjBtn = document.getElementById("btn-export-project");
+  if (exportProjBtn) {
+    exportProjBtn.addEventListener("click", exportProjectJSON);
   }
 });
 
@@ -394,8 +431,37 @@ function handleUploadedFile(file) {
       }
     };
     reader.readAsArrayBuffer(file);
+  } else if (ext === "json") {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const projectObj = JSON.parse(e.target.result);
+        if (projectObj.app !== "DD_Stat" || !projectObj.data || !projectObj.headers) {
+          alert("유효한 DD Stat 프로젝트 백업 파일이 아닙니다.");
+          return;
+        }
+
+        // 상태 복원
+        AppState.headers = projectObj.headers;
+        AppState.colTypes = projectObj.colTypes || {};
+        AppState.valueLabels = projectObj.valueLabels || {};
+        AppState.missingRules = projectObj.missingRules || {};
+        AppState.data = projectObj.data;
+
+        AppState.selectedRows.clear();
+        AppState.currentPage = 1;
+
+        updateDataWorkspace();
+        resetAnalysisVariables();
+        showWorkspace(true);
+        alert("DD Stat 프로젝트 데이터 및 변수 설정이 완벽하게 복원되었습니다!");
+      } catch (err) {
+        alert("JSON 프로젝트 파일 로드 중 오류가 발생했습니다: " + err.message);
+      }
+    };
+    reader.readAsText(file);
   } else {
-    alert("지원하지 않는 파일 형식입니다. CSV 또는 Excel 파일을 선택해주세요.");
+    alert("지원하지 않는 파일 형식입니다. CSV, Excel 또는 JSON(프로젝트) 파일을 선택해주세요.");
   }
 }
 
@@ -860,16 +926,19 @@ function initPreprocessTools() {
 
     if (method === "exclude") {
       AppState.data = AppState.data.filter(row => {
-        return AppState.headers.every(h => row[h] !== null && row[h] !== undefined && row[h] !== "");
+        return AppState.headers.every(h => !isMissingValue(h, row[h]));
       });
     } else if (method === "mean") {
       AppState.headers.forEach(h => {
         if (AppState.colTypes[h] === "continuous") {
-          const vals = AppState.data.map(row => parseFloat(row[h])).filter(v => !isNaN(v));
+          const vals = AppState.data
+            .map(row => parseFloat(row[h]))
+            .filter(v => !isNaN(v) && !isMissingValue(h, v));
+          
           if (vals.length > 0) {
             const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
             AppState.data.forEach(row => {
-              if (row[h] === "" || row[h] === null || row[h] === undefined) {
+              if (isMissingValue(h, row[h])) {
                 row[h] = parseFloat(avg.toFixed(3));
               }
             });
@@ -879,7 +948,7 @@ function initPreprocessTools() {
     } else if (method === "zero") {
       AppState.data.forEach(row => {
         AppState.headers.forEach(h => {
-          if (row[h] === "" || row[h] === null || row[h] === undefined) {
+          if (isMissingValue(h, row[h])) {
             row[h] = AppState.colTypes[h] === "continuous" ? 0 : "0";
           }
         });
@@ -1003,9 +1072,12 @@ function initPreprocessTools() {
 }
 
 // --- 기술통계 및 시각화 화면 ---
+populateDescSelects();
 function populateDescSelects() {
   const select1 = document.getElementById("desc-select-var1");
   const select2 = document.getElementById("desc-select-var2");
+
+  if (!select1 || !select2) return;
 
   select1.innerHTML = `<option value="">-- 변수를 선택해 주세요 --</option>`;
   select2.innerHTML = `<option value="">-- 선택 안함 (단일 분석) --</option>`;
@@ -1218,6 +1290,8 @@ function drawDescriptiveChart(var1, var2, chartType) {
   const ctx = document.getElementById("desc-chart");
   const stemLeaf = document.getElementById("stem-leaf-display");
   
+  if (!ctx) return;
+
   // 이전 차트 인스턴스 소멸
   if (AppState.chartInstance) {
     AppState.chartInstance.destroy();
@@ -1805,6 +1879,7 @@ function renderDescBivariateContinuousInterpretation(var1, var2) {
 // --- 추론통계 분석 화면 ---
 function initInferLayout() {
   const methodSelect = document.getElementById("infer-method");
+  if (!methodSelect) return;
   
   // 분석 방법 선택에 따라 변수 선택 폼 동적 갱신
   methodSelect.addEventListener("change", updateInferMethodOptions);
@@ -1816,6 +1891,7 @@ function updateInferMethodOptions() {
   const method = document.getElementById("infer-method").value;
   const container = document.getElementById("infer-variables-container");
   
+  if (!container) return;
   container.innerHTML = "";
 
   const optionsHTML = AppState.headers.map(h => `<option value="${h}">${h}</option>`).join("");
@@ -2398,7 +2474,7 @@ function runPairedTTestAnalysis() {
   alertBox.style.backgroundColor = "var(--warning-light)";
   alertBox.style.color = "var(--warning)";
   alertBox.style.borderColor = "var(--warning)";
-  alertTxt.textContent = "주의: 전후 차이가 유의하더라도, 다른 외생 변수(예: 성장 효과, 우연히 쉬워진 시험 등)의 통제가 이루어지지 않았다면 변화의 진짜 원인이 오직 해당 조치 때문이라고 단정할 수 없습니다.";
+  alertTxt.textContent = "주의: 전후 차이가 유의하더라도, 다른 외생 변수(예: 성장 효과, 우연히 쉬워진 시험 등)의 통제가 이루어지지 않았다면 변화의 진짜 원인이 오직 해당 조치 때문라고 단정할 수 없습니다.";
 }
 
 // 4) 일원분산분석 ANOVA 실행
@@ -3658,6 +3734,7 @@ function runMultipleRegressionAnalysis() {
 // 가정 점검 대시보드 렌더러
 function renderAssumptionDashboard(checks) {
   const container = document.getElementById("assumption-list-container");
+  if (!container) return;
   container.innerHTML = "";
   
   checks.forEach(chk => {
@@ -3689,6 +3766,8 @@ function renderAssumptionDashboard(checks) {
 function initProbCalculator() {
   const distSelect = document.getElementById("prob-dist-type");
   const rangeSelect = document.getElementById("select-prob-range");
+
+  if (!distSelect || !rangeSelect) return;
 
   distSelect.addEventListener("change", () => {
     const normalParams = document.getElementById("prob-normal-params");
@@ -3910,6 +3989,8 @@ function initWizard() {
   const prevBtn = document.getElementById("btn-wizard-prev");
   const goBtn = document.getElementById("btn-wizard-go");
 
+  if (!nextBtn) return;
+
   const step1 = document.getElementById("wizard-step-1");
   const step2 = document.getElementById("wizard-step-2");
   const step3 = document.getElementById("wizard-step-3");
@@ -4097,6 +4178,7 @@ copyBtns.forEach(btn => {
 // --- 페이지네이션 컨트롤러 렌더링 및 이벤트 ---
 function renderPagination() {
   const paginationContainer = document.getElementById("table-pagination");
+  if (!paginationContainer) return;
   if (AppState.data.length === 0) {
     paginationContainer.classList.add("hidden");
     return;
