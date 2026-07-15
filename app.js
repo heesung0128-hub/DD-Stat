@@ -143,6 +143,38 @@ function downloadExcelTemplate() {
   XLSX.writeFile(wb, "DD_Stat_Template.xlsx");
 }
 
+// --- 현재 데이터 내보내기 (다운로드) 함수 ---
+function downloadCurrentData() {
+  if (typeof XLSX === 'undefined') {
+    alert("SheetJS 라이브러리가 로드되지 않아 데이터를 내보낼 수 없습니다.");
+    return;
+  }
+  if (AppState.data.length === 0) {
+    alert("내보낼 데이터가 없습니다. 먼저 데이터를 업로드하거나 입력해 주십시오.");
+    return;
+  }
+
+  // 1. 헤더행 구성
+  const headers = AppState.headers;
+  const ws_data = [headers];
+
+  // 2. 데이터행들 구성
+  AppState.data.forEach(row => {
+    const rowList = [];
+    headers.forEach(h => {
+      rowList.push(row[h]);
+    });
+    ws_data.push(rowList);
+  });
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(ws_data);
+  XLSX.utils.book_append_sheet(wb, ws, "내보낸_데이터");
+
+  // 파일 다운로드 트리거
+  XLSX.writeFile(wb, "DD_Stat_Data_Export.xlsx");
+}
+
 // --- DOM 로드 시 초기화 ---
 document.addEventListener("DOMContentLoaded", () => {
   initTheme();
@@ -160,6 +192,12 @@ document.addEventListener("DOMContentLoaded", () => {
   const downloadBtn = document.getElementById("btn-download-template");
   if (downloadBtn) {
     downloadBtn.addEventListener("click", downloadExcelTemplate);
+  }
+
+  // 현재 데이터 내보내기 버튼 바인딩
+  const exportBtn = document.getElementById("btn-download-data");
+  if (exportBtn) {
+    exportBtn.addEventListener("click", downloadCurrentData);
   }
 });
 
@@ -432,7 +470,7 @@ function showWorkspace(show) {
   }
 }
 
-// --- 샘플 데이터 탑재 ---
+// --- 템플릿 데이터 불러오기 ---
 function initSampleData() {
   // 1) 학업 성취도 & 수면 시간 (Sleep_Hours, Academic_Score)
   document.getElementById("btn-sample-study").addEventListener("click", () => {
@@ -642,7 +680,7 @@ function deleteColumn(colName) {
 }
 
 function resetAnalysisVariables(colName) {
-  // 1. colName이 명시된 경우 분석용 select들의 선택값 초기화 (기존 로직 유지)
+  // 1. colName이 명시된 경우 분석용 select들의 선택값 초기화
   if (colName) {
     const selects = ["desc-select-var1", "desc-select-var2", "infer-select-var", "infer-select-group", "infer-select-var1", "infer-select-var2", "select-recode-col"];
     selects.forEach(id => {
@@ -669,10 +707,10 @@ function resetAnalysisVariables(colName) {
   const end = Math.min(start + AppState.pageSize, totalRows);
   const pageData = AppState.data.slice(start, end);
 
-  // 체크박스 마스터 이벤트 (현재 페이지의 행들을 다량으로 다룰 때 요긴)
+  // 체크박스 마스터 이벤트
   const checkAll = document.getElementById("check-all-rows");
   
-  // 마스터 체크박스의 초기 상태 결정 (현재 페이지가 모두 선택되어 있는가)
+  // 마스터 체크박스의 초기 상태 결정
   let allCheckedOnPage = pageData.length > 0;
   for (let i = 0; i < pageData.length; i++) {
     const globalIdx = start + i;
@@ -1674,12 +1712,10 @@ function drawDescriptiveChart(var1, var2, chartType) {
     stemLeaf.classList.remove("hidden");
 
     // 줄기-잎 알고리즘
-    // 연속형 수치를 소수점 첫째자리까지 버림하고, 십의자리(줄기)와 일의자리(잎)로 구분
     const numericVals = data1.map(v => parseFloat(v)).filter(v => !isNaN(v)).sort((a,b)=>a-b);
     const stemLeafMap = {};
     
     numericVals.forEach(v => {
-      // 10으로 나눈 목(줄기)과 나머지(잎)
       const rounded = Math.round(v);
       const stem = Math.floor(rounded / 10);
       const leaf = rounded % 10;
@@ -1735,7 +1771,7 @@ function renderDescInterpretation(var1, var2) {
   } else {
     box.innerHTML = `
       <p>두 범주형 변수인 <strong>'${var1}'</strong>와 <strong>'${var2}'</strong>를 연계하여 다차원 교차표를 도출한 결과입니다.</p>
-      <p>각 집단 내에서 상대적인 빈도 패턴을 통해 두 변수 간에 어떠한 연관적 쏠림 경향이 있는지 직관적으로 살필 수 있습니다. 구체적인 연관 유의성을 검증하려면 <strong>3단계 추론통계 분석의 '카이제곱 독립성 검정'</strong>을 이용해 주십시오.</p>
+      <p>각 집단 내에서 상대적인 빈도 패턴을 통해 두 변수 간에 어떠한 연관적 쏠림 경향이 있는지 직관적으로 살필 수 있습니다. 구체적인 연관 유의성을 검증하려면 <strong>3단계 추론통계 분석의 '교차분석'</strong>을 이용해 주십시오.</p>
     `;
   }
 }
@@ -1853,24 +1889,42 @@ function updateInferMethodOptions() {
       `;
       break;
       
-    case "chisq-fit":
+    case "multireg":
+      let xCheckboxes = "";
+      AppState.headers.forEach(h => {
+        if (AppState.colTypes[h] === "continuous" || AppState.colTypes[h] === "likert") {
+          xCheckboxes += `
+            <div style="margin-bottom: 6px;">
+              <label style="font-weight:normal; cursor:pointer; display:flex; align-items:center; gap:6px;">
+                <input type="checkbox" name="infer-multireg-x" value="${h}"> <span>${h}</span>
+              </label>
+            </div>
+          `;
+        }
+      });
       container.innerHTML = `
         <div class="form-group">
-          <label for="infer-select-var">검정할 범주형 변수:</label>
-          <select id="infer-select-var" class="form-control mt-1">${catOptionsHTML}</select>
+          <label for="infer-select-var2">결과가 되는 종속변수 (Y, 수치형):</label>
+          <select id="infer-select-var2" class="form-control mt-1">${numOptionsHTML}</select>
         </div>
-        <p class="input-tip mt-2">각 범주의 실제 관측 비율이 균등한 분포를 따르는지 검증합니다.</p>
+        <div class="form-group mt-3">
+          <label style="font-weight:600;">원인이 되는 독립변수 선택 (X, 수치형, 복수 선택):</label>
+          <div class="checkbox-list-container" style="max-height: 150px; overflow-y: auto; padding: 10px; border: 1px solid var(--border-glass); border-radius: var(--radius-sm); margin-top: 6px; background-color: var(--bg-card);">
+            ${xCheckboxes || "<p style='font-size:11px;color:var(--text-muted);'>선택 가능한 수치형 변수가 없습니다.</p>"}
+          </div>
+          <p class="input-tip mt-1">예측에 영향을 미치는 독립변수를 2개 이상 선택할 수 있습니다.</p>
+        </div>
       `;
       break;
       
     case "chisq-ind":
       container.innerHTML = `
         <div class="form-group">
-          <label for="infer-select-var1">교차할 첫 번째 범주 변수:</label>
+          <label for="infer-select-var1">교차할 첫 번째 범주 변수 (행):</label>
           <select id="infer-select-var1" class="form-control mt-1">${catOptionsHTML}</select>
         </div>
         <div class="form-group mt-3">
-          <label for="infer-select-var2">교차할 두 번째 범주 변수:</label>
+          <label for="infer-select-var2">교차할 두 번째 범주 변수 (열):</label>
           <select id="infer-select-var2" class="form-control mt-1">${catOptionsHTML}</select>
         </div>
       `;
@@ -1908,7 +1962,7 @@ function runInferentialAnalysis() {
   const method = document.getElementById("infer-method").value;
   const hypothesis = document.getElementById("txt-hypothesis").value.trim();
 
-  // 가설 적었는지 검사 (p-hacking 오용 방지 장치)
+  // 가설 오용 방지 검증
   if (!hypothesis) {
     alert("오용 방지를 위해 통계 검정 실행 전 반드시 '연구 가설 적어보기'를 입력해 주십시오!");
     document.getElementById("txt-hypothesis").focus();
@@ -1943,9 +1997,6 @@ function runInferentialAnalysis() {
     case "anova":
       runAnovaAnalysis();
       break;
-    case "chisq-fit":
-      runChiSquareFitAnalysis();
-      break;
     case "chisq-ind":
       runChiSquareIndAnalysis();
       break;
@@ -1955,10 +2006,13 @@ function runInferentialAnalysis() {
     case "regression":
       runRegressionAnalysis();
       break;
+    case "multireg":
+      runMultipleRegressionAnalysis();
+      break;
   }
 }
 
-// 1) 모평균 신뢰구간 추정 분석 실행
+// 1) 신뢰구간 분석 실행
 function runCIAnalysis() {
   const varName = document.getElementById("infer-select-var").value;
   const level = parseFloat(document.getElementById("infer-select-level").value);
@@ -2030,7 +2084,7 @@ function runIndependentTTestAnalysis() {
     return;
   }
   
-  // 3개 집단 이상인 경우 t-검정 오용 경고 및 ANOVA 유도 (핵심 오용 방지 장치)
+  // 3개 집단 이상인 경우 ANOVA 유도
   if (grpArray.length > 2) {
     if (confirm(`집단 변수 '${groupVar}'에 3개 이상의 그룹(${grpArray.join(", ")})이 발견되었습니다. 세 집단 이상의 비교는 t-검정을 반복하는 대신 '일원분산분석(One-way ANOVA)'을 수행하는 것이 통계적으로 올바릅니다. 일원분산분석(ANOVA)으로 변경하여 실행할까요?`)) {
       document.getElementById("infer-method").value = "anova";
@@ -2077,7 +2131,7 @@ function runIndependentTTestAnalysis() {
   // 3. 결과 요약표
   const table = document.getElementById("infer-result-table");
   
-  // 등분산 판정에 따른 가이드 텍스트 (르빈 검정 기반)
+  // 등분산 판정에 따른 가이드 텍스트
   const passed = tResult.homoscedasticity.passed;
   const leveneF = tResult.homoscedasticity.fValue;
   const leveneP = tResult.homoscedasticity.pValue;
@@ -2661,72 +2715,7 @@ function runAnovaAnalysis() {
   alertTxt.textContent = "주의: 분산분석(ANOVA)은 집단 간 평균의 차이를 식별하지만, 집단 구분이 독립적인 제3의 통제되지 않은 환경 요소들과 복합적으로 얽혀있을 수 있으므로 단정적인 인과 해석은 지양해야 합니다.";
 }
 
-// 5) 카이제곱 적합도 검정 실행
-function runChiSquareFitAnalysis() {
-  const varName = document.getElementById("infer-select-var").value;
-  const data = AppState.data.map(r => String(r[varName]).trim()).filter(v => !isMissingValue(varName, v));
-
-  const freq = StatsHelper.calculateFrequency(data);
-  const observed = freq.list.map(l => l.count);
-  const labels = freq.list.map(l => l.value);
-
-  // 1. 가정 점검
-  const lowCells = observed.filter(o => o < 5).length;
-  const lowCellPct = (lowCells / observed.length) * 100;
-  const passed = lowCellPct <= 20;
-  const cellCheck = {
-    passed,
-    reason: passed
-      ? `모든 범주의 관측치(N=${freq.total})가 충분하여 카이제곱 근사가 적절합니다.`
-      : `기대/관측 빈도가 5 미만인 범주 비율이 ${lowCellPct.toFixed(1)}%로 20%를 초과합니다. 신뢰도가 낮아질 수 있습니다.`,
-    severity: passed ? "success" : "warning"
-  };
-  renderAssumptionDashboard([cellCheck]);
-
-  // 2. 검정 연산
-  const chisq = StatsHelper.chiSquareTest(observed, null, "goodness");
-  if (chisq.error) {
-    alert(chisq.error);
-    return;
-  }
-
-  // 3. 결과 요약표
-  const table = document.getElementById("infer-result-table");
-  const sig = chisq.pValue < 0.05 ? "유의함 (p < 0.05)" : "유의하지 않음 (p ≥ 0.05)";
-
-  let rowsHtml = "";
-  labels.forEach((lbl, idx) => {
-    rowsHtml += `<tr><td>'${lbl}' 관측빈도 (기대빈도)</td><td>${observed[idx]}명 (${chisq.expected[idx].toFixed(1)}명)</td><td>오차 = ${(observed[idx] - chisq.expected[idx]).toFixed(1)}</td></tr>`;
-  });
-
-  table.innerHTML = `
-    <tr><th>통계 지표</th><th>결과값</th><th>설명</th></tr>
-    ${rowsHtml}
-    <tr><td><strong>카이제곱 통계량 (χ²)</strong></td><td>${chisq.chi2Value.toFixed(3)}</td><td>실제 관측치와 기대치 분포의 차이 지표</td></tr>
-    <tr><td><strong>자유도 (df)</strong></td><td>${chisq.df}</td><td>범주 수 - 1</td></tr>
-    <tr class="highlight-row"><td><strong>유의확률 (p-value)</strong></td><td><strong>${chisq.pValue.toFixed(4)}</strong> (${sig})</td><td>차이가 전혀 없는데 우연히 이런 왜곡 빈도가 관측될 확률</td></tr>
-  `;
-
-  // 4. 한국어 해석
-  const isSig = chisq.pValue < 0.05;
-  const interpretation = document.getElementById("infer-korean-interpretation");
-  
-  interpretation.innerHTML = `
-    <p>범주형 변수 <strong>'${varName}'</strong>의 각 범주 빈도가 균등한 기대를 따르는지 적합도 검정을 수행했습니다.</p>
-    <p>검정 결과, 범주별 편차 분포는 통계적으로 <strong>${isSig ? "유의미한 차이가 존재합니다" : "유의미한 차이가 나지 않습니다"}</strong> (χ² = ${chisq.chi2Value.toFixed(2)}, p = ${chisq.pValue.toFixed(3)}).</p>
-    <p>${isSig ? `즉, 각 범주가 균등한 비율로 선택되지 않고, 특정 항목으로 통계적으로 유의하게 치우친 편향 현상이 나타났음을 뜻합니다.` : `즉, 각 범주가 균등하게 고른 빈도로 분포되어 있어 고른 균등 기대를 충족하고 있습니다.`}</p>
-  `;
-
-  // 5. 경고판
-  const alertBox = document.getElementById("interpretation-limit-box");
-  const alertTxt = document.getElementById("interpretation-limit-text");
-  alertBox.style.backgroundColor = "var(--info-light)";
-  alertBox.style.color = "var(--info)";
-  alertBox.style.borderColor = "var(--info)";
-  alertTxt.textContent = "주의: 카이제곱 적합도 검정은 가설상의 확률(이론적 분포)과 수집 데이터 빈도를 비교하며, N이 너무 작으면 신뢰를 담보하기 어렵습니다.";
-}
-
-// 6) 카이제곱 독립성 검정 실행
+// 5) 카이제곱 독립성 검정 실행 (교차분석)
 function runChiSquareIndAnalysis() {
   const var1 = document.getElementById("infer-select-var1").value;
   const var2 = document.getElementById("infer-select-var2").value;
@@ -2842,7 +2831,7 @@ function runChiSquareIndAnalysis() {
   alertTxt.textContent = "주의: 카이제곱 연관성 유의는 두 요인이 연계되어 움직인다는 관계(상관)를 말하며, 이것이 한쪽이 다른 한쪽을 바꾸는 '원인과 결과(인과)'라는 직접적 논거가 되지 않습니다.";
 }
 
-// 7) 피어슨 상관분석 실행
+// 6) 피어슨 상관분석 실행
 function runCorrelationAnalysis() {
   const var1 = document.getElementById("infer-select-var1").value;
   const var2 = document.getElementById("infer-select-var2").value;
@@ -3064,7 +3053,7 @@ function runCorrelationAnalysis() {
   alertTxt.textContent = "CRITICAL WARNING (인과 비약 방지): 상관관계(Correlation)는 두 요인이 연동해 움직이는 징후를 나타낼 뿐이며, 결코 인과관계(Causation)를 설명하지 못합니다. 즉, '공부 시간이 많아서 성적이 잘나온다'처럼 스마트폰이 수면을 줄인 원인이라고 단정하면 안 되며, 다른 요인(예: 조력 수준 등)이 매개했을 수 있습니다.";
 }
 
-// 8) 단순선형회귀분석 실행
+// 7) 단순선형회귀분석 실행
 function runRegressionAnalysis() {
   const var1 = document.getElementById("infer-select-var1").value;
   const var2 = document.getElementById("infer-select-var2").value;
@@ -3225,7 +3214,7 @@ function runRegressionAnalysis() {
   const sumSqX = (stats1.n - 1) * stats1.variance;
   const seIntercept = sumSqX > 0 ? Math.sqrt(msRes * (1 / reg.n + Math.pow(stats1.mean, 2) / sumSqX)) : 0;
   const tValueIntercept = seIntercept > 0 ? reg.intercept / seIntercept : 0;
-  const pValueIntercept = 2 * (1 - jStat.studentt.cdf(Math.abs(tValueIntercept), reg.dfRes));
+  const pValueIntercept = 2 * (1 - jStat.studentt.cdf(Math.abs(tValueIntercept), dfRes));
 
   let coeffHtml = `
     <tr><th colspan="4" style="padding-top:15px;">4. 회귀계수 (Coefficients Table)</th></tr>
@@ -3363,6 +3352,309 @@ function runRegressionAnalysis() {
   alertTxt.textContent = "CRITICAL WARNING (인과 비약 방지): 회귀 분석은 예측 방정식 형태로 인과를 흉내 내지만, 실제로는 통계적 '선형 패턴'을 수치화한 것에 불과합니다. 변수 간의 논리적 메커니즘과 이론적 기반이 없거나 교란 변수를 차단하지 못했다면 결코 완벽한 원인-결과(인과)로 단정할 수 없으며 오직 상관성에 준해 보고해야 합니다.";
 }
 
+// 9) 다중선형회귀분석 실행
+function runMultipleRegressionAnalysis() {
+  const varY = document.getElementById("infer-select-var2").value;
+  const checkedBoxes = document.querySelectorAll('input[name="infer-multireg-x"]:checked');
+  const varXList = Array.from(checkedBoxes).map(cb => cb.value);
+
+  if (varXList.length === 0) {
+    alert("원인이 되는 독립변수(X)를 최소 1개 이상 선택해 주십시오.");
+    return;
+  }
+
+  if (varXList.includes(varY)) {
+    alert(`종속변수('${varY}')가 독립변수 선택 목록에 포함되어 있습니다. 변수 지정을 점검해 주십시오.`);
+    return;
+  }
+
+  const xDataList = [];
+  const yData = [];
+
+  AppState.data.forEach(row => {
+    let hasMissing = isMissingValue(varY, row[varY]);
+    varXList.forEach(x => {
+      if (isMissingValue(x, row[x])) hasMissing = true;
+    });
+
+    if (!hasMissing) {
+      const yVal = parseFloat(row[varY]);
+      const xVals = varXList.map(x => parseFloat(row[x]));
+      if (!isNaN(yVal) && xVals.every(xv => !isNaN(xv))) {
+        xDataList.push(xVals);
+        yData.push(yVal);
+      }
+    }
+  });
+
+  const n = yData.length;
+  const p = varXList.length;
+
+  if (n < p + 2) {
+    alert(`유효한 데이터 표본 수(N=${n})가 독립변수 개수(${p})에 비해 너무 작습니다. 최소 ${p + 2}개 이상의 매칭 데이터 쌍이 필요합니다.`);
+    return;
+  }
+
+  // 1. 가정 점검
+  const assumptionChecks = [];
+  varXList.forEach(x => {
+    const xCol = xDataList.map(row => row[varXList.indexOf(x)]);
+    const norm = StatsHelper.checkNormality(xCol);
+    norm.reason = `독립변수 '${x}' 정규성: ` + norm.reason;
+    assumptionChecks.push(norm);
+  });
+  renderAssumptionDashboard(assumptionChecks);
+
+  // 2. 연산
+  const reg = StatsHelper.multipleLinearRegression(xDataList, yData, varXList);
+  if (reg.error) {
+    alert(reg.error);
+    return;
+  }
+
+  // 3. 결과 요약표
+  const table = document.getElementById("infer-result-table");
+  const sigF = reg.pValueF < 0.05 ? "유의함 (p < 0.05)" : "유의하지 않음 (p ≥ 0.05)";
+
+  const stdErrorEst = Math.sqrt(reg.msRes);
+  const rVal = Math.sqrt(reg.rSquared);
+  let summaryHtml = `
+    <tr><th colspan="5">1. 모형 요약 (Model Summary)</th></tr>
+    <tr>
+      <td colspan="5" style="padding:0; border:none;">
+        <table class="data-table" style="font-size:12px; width:100%; border-collapse:collapse; margin:0;">
+          <thead>
+            <tr style="background-color:rgba(114, 46, 209, 0.03);">
+              <th style="border:1px solid var(--border-glass); padding:8px;">R (상관계수)</th>
+              <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">R제곱 (R²)</th>
+              <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">조정된 R제곱 (Adj R²)</th>
+              <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">추정값의 표준오차 (SE)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="border:1px solid var(--border-glass); padding:8px; text-align:center;">${rVal.toFixed(4)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; font-weight:bold; color:var(--primary);">${reg.rSquared.toFixed(4)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center;">${reg.adjustedRSquared.toFixed(4)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center;">${stdErrorEst.toFixed(4)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </td>
+    </tr>
+  `;
+
+  let anovaHtml = `
+    <tr><td colspan="5" style="padding-top:15px; border:none;"></td></tr>
+    <tr><th colspan="5">2. 분산분석표 (ANOVA Table - SPSS 표준 양식)</th></tr>
+    <tr>
+      <td colspan="5" style="padding:0; border:none;">
+        <table class="data-table" style="font-size:11px; width:100%; border-collapse:collapse; margin:0;">
+          <thead>
+            <tr style="background-color:rgba(114, 46, 209, 0.05);">
+              <th style="border:1px solid var(--border-glass); padding:8px;">구분</th>
+              <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">제곱합 (SS)</th>
+              <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">자유도 (df)</th>
+              <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">평균제곱 (MS)</th>
+              <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">F</th>
+              <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">유의확률 (Sig.)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="border:1px solid var(--border-glass); padding:8px;"><strong>회귀 (Regression)</strong></td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.ssReg.toFixed(3)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.dfReg}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.msReg.toFixed(3)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center;" rowspan="2" style="vertical-align:middle;"><strong>${reg.fValue.toFixed(3)}</strong></td>
+              <td style="border:1px solid var(--border-glass); text-align:center;" rowspan="2" style="vertical-align:middle; color:${reg.pValueF < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${reg.pValueF.toFixed(4)}</strong><br><span style="font-size:9px;font-weight:normal;">(${sigF})</span></td>
+            </tr>
+            <tr>
+              <td style="border:1px solid var(--border-glass); padding:8px;"><strong>잔차 (Residual)</strong></td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.ssRes.toFixed(3)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.dfRes}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.msRes.toFixed(3)}</td>
+            </tr>
+            <tr class="highlight-row">
+              <td style="border:1px solid var(--border-glass); padding:8px;"><strong>합계 (Total)</strong></td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.ssTot.toFixed(3)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.dfTot}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;"></td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;"></td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;"></td>
+            </tr>
+          </tbody>
+        </table>
+      </td>
+    </tr>
+  `;
+
+  let coeffRowsHtml = "";
+  reg.coefficients.forEach(c => {
+    const isSig = c.pValue < 0.05;
+    const sigLabel = isSig ? `<strong>${c.pValue.toFixed(4)} *</strong>` : c.pValue.toFixed(4);
+    const betaStr = c.beta !== null ? c.beta.toFixed(3) : "";
+    coeffRowsHtml += `
+      <tr style="${isSig && c.name !== '(상수 - Intercept)' ? 'background-color:rgba(114, 46, 209, 0.02); font-weight:600;' : ''}">
+        <td style="border:1px solid var(--border-glass); padding:8px;"><strong>${c.name}</strong></td>
+        <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${c.b.toFixed(3)}</td>
+        <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${c.se.toFixed(3)}</td>
+        <td style="border:1px solid var(--border-glass); text-align:center; padding:8px; font-weight:bold;">${betaStr}</td>
+        <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${c.tValue.toFixed(3)}</td>
+        <td style="border:1px solid var(--border-glass); text-align:center; padding:8px; color:${isSig ? 'var(--primary)' : 'inherit'};">${sigLabel}</td>
+      </tr>
+    `;
+  });
+
+  let coeffHtml = `
+    <tr><td colspan="5" style="padding-top:15px; border:none;"></td></tr>
+    <tr><th colspan="5">3. 회귀계수 결과 상세 (Coefficients Table - SPSS 표준)</th></tr>
+    <tr>
+      <td colspan="5" style="padding:0; border:none;">
+        <div class="table-scroll-container" style="margin:0;">
+          <table class="data-table" style="font-size:11px; width:100%; border-collapse:collapse; margin:0;">
+            <thead>
+              <tr style="background-color:rgba(114, 46, 209, 0.05);">
+                <th rowspan="2" style="border:1px solid var(--border-glass); padding:8px; vertical-align:middle;">변수 요인</th>
+                <th colspan="2" style="border:1px solid var(--border-glass); text-align:center; padding:8px;">비표준화 계수</th>
+                <th style="border:1px solid var(--border-glass); text-align:center; padding:8px; vertical-align:middle;">표준화 계수</th>
+                <th rowspan="2" style="border:1px solid var(--border-glass); text-align:center; padding:8px; vertical-align:middle;">t</th>
+                <th rowspan="2" style="border:1px solid var(--border-glass); text-align:center; padding:8px; vertical-align:middle;">유의확률 (Sig.)</th>
+              </tr>
+              <tr style="background-color:rgba(114, 46, 209, 0.05);">
+                <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">B</th>
+                <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">표준오차 (SE)</th>
+                <th style="border:1px solid var(--border-glass); text-align:center; padding:8px;">Beta</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${coeffRowsHtml}
+            </tbody>
+          </table>
+        </div>
+      </td>
+    </tr>
+  `;
+
+  table.innerHTML = summaryHtml + anovaHtml + coeffHtml;
+
+  // 4. 시각화 (실제 Y vs 예측 Y 산점도)
+  const chartCard = document.getElementById("infer-chart-card");
+  chartCard.classList.remove("hidden");
+  
+  const ctx = document.getElementById("infer-chart");
+  if (AppState.chartInstance) AppState.chartInstance.destroy();
+
+  const predPoints = [];
+  for (let i = 0; i < n; i++) {
+    let pred = reg.coefficients[0].b; // Intercept
+    for (let j = 0; j < p; j++) {
+      pred += reg.coefficients[j + 1].b * xDataList[i][j];
+    }
+    predPoints.push({ x: yData[i], y: pred });
+  }
+
+  const allVals = [...yData, ...predPoints.map(pt => pt.y)];
+  const minVal = Math.min(...allVals);
+  const maxVal = Math.max(...allVals);
+
+  const diagLine = [
+    { x: minVal, y: minVal },
+    { x: maxVal, y: maxVal }
+  ];
+
+  const isDark = AppState.theme === "dark";
+  const textColor = isDark ? "#c8cdd4" : "#2d3748";
+  const gridColor = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)";
+
+  AppState.chartInstance = new Chart(ctx, {
+    type: "scatter",
+    data: {
+      datasets: [
+        {
+          label: "관측 표본 (실제값 vs 예측값)",
+          data: predPoints,
+          backgroundColor: "rgba(114, 46, 209, 0.7)",
+          borderColor: "var(--primary)",
+          borderWidth: 1,
+          pointRadius: 5
+        },
+        {
+          label: "이상적인 예측선 (Y = Ŷ)",
+          data: diagLine,
+          type: "line",
+          borderColor: "rgba(207, 19, 34, 0.6)",
+          borderWidth: 2,
+          borderDash: [5, 5],
+          fill: false,
+          pointRadius: 0
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: textColor } },
+        title: { display: true, text: `실제 Y(${varY}) vs 모형 예측값 비교 산점도`, color: textColor }
+      },
+      scales: {
+        x: { title: { display: true, text: `실제값: ${varY}`, color: textColor }, grid: { color: gridColor }, ticks: { color: textColor } },
+        y: { title: { display: true, text: `예측값`, color: textColor }, grid: { color: gridColor }, ticks: { color: textColor } }
+      }
+    }
+  });
+
+  document.getElementById("btn-download-infer-chart").onclick = () => {
+    const url = ctx.toDataURL("image/png");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Multiple_Regression_${varY}.png`;
+    a.click();
+  };
+
+  // 5. 한국어 해석
+  const isModelSig = reg.pValueF < 0.05;
+  const interpretation = document.getElementById("infer-korean-interpretation");
+
+  const sigVariables = reg.coefficients.filter(c => c.name !== '(상수 - Intercept)' && c.pValue < 0.05);
+  const sigVarNames = sigVariables.map(c => `'${c.name}'`);
+
+  let maxBetaVal = -1;
+  let keyFactor = null;
+  reg.coefficients.forEach(c => {
+    if (c.name !== '(상수 - Intercept)' && c.beta !== null) {
+      if (Math.abs(c.beta) > maxBetaVal) {
+        maxBetaVal = Math.abs(c.beta);
+        keyFactor = c;
+      }
+    }
+  });
+
+  let keyFactorText = "";
+  if (keyFactor && keyFactor.pValue < 0.05) {
+    keyFactorText = `<p>그중 표준화계수(Beta = <strong>${keyFactor.beta.toFixed(3)}</strong>)에 근거하여 종속변수에 가장 결정적 영향력을 행사하는 핵심 원인 변수는 <strong>'${keyFactor.name}'</strong>인 것으로 규명되었습니다.</p>`;
+  }
+
+  interpretation.innerHTML = `
+    <p>독립변수군(${varXList.map(x => `'${x}'`).join(", ")})이 종속변수 <strong>'${varY}'</strong>에 유의미한 예측 효과를 미치는지 다중선형회귀분석을 구동하였습니다.</p>
+    <p>분석결과, 회귀 모형의 분산분석 유의성 검정 F값은 <strong>${reg.fValue.toFixed(3)}</strong>이며, 모델 유의확률 p값은 <strong>${reg.pValueF.toFixed(4)}</strong>로 나타나 통계적으로 <strong>${isModelSig ? "유의미하게 타당합니다" : "유의미하지 않습니다"}</strong>.</p>
+    <p>모형의 전체 결정계수(R-Square)는 <strong>${reg.rSquared.toFixed(3)}</strong>로, 이 회귀식의 원인 변수들이 결과 요인인 '${varY}' 총변동의 약 <strong>${(reg.rSquared*100).toFixed(1)}%</strong>를 유의하게 설명하고 있습니다.</p>
+    ${isModelSig && sigVariables.length > 0 
+      ? `<p>회귀계수 유의성을 개별 검정한 결과, 독립변수들 중 <strong>${sigVarNames.join(", ")}</strong> 요인(들)이 5% 유의수준 하에서 통계적으로 유의한 예측 기여를 하는 것으로 실증되었습니다.</p>`
+      : `<p>개별 독립변수들의 회귀계수(B) 중 5% 유의수준에서 유의미한 독자적 설명력을 가지는 요인은 없는 것으로 나타났습니다.</p>`
+    }
+    ${keyFactorText}
+  `;
+
+  // 6. 경고판
+  const alertBox = document.getElementById("interpretation-limit-box");
+  const alertTxt = document.getElementById("interpretation-limit-text");
+  alertBox.style.backgroundColor = "var(--danger-light)";
+  alertBox.style.color = "var(--danger)";
+  alertBox.style.borderColor = "var(--danger)";
+  alertTxt.textContent = "CRITICAL WARNING (인과 비약 방지): 다중선형회귀분석은 복수 변수의 통계적 연합을 보여줍니다. 그러나 변수들 사이에 다중공선성(변수 간 선형 종속)이 크거나, 표집 편향이 존재한다면 왜곡된 explanation력을 가집니다. 이를 인과관계로 비약해석하는 것은 철저히 지양해 주십시오.";
+}
+
 // 가정 점검 대시보드 렌더러
 function renderAssumptionDashboard(checks) {
   const container = document.getElementById("assumption-list-container");
@@ -3466,7 +3758,6 @@ function runProbabilityCalculation() {
 
     infoStr = `정규분포: 평균 μ = ${mean}, 분산 σ² = ${(std*std).toFixed(2)}`;
 
-    // 연속형 곡선 그리기 (평균 주위 ±4σ 영역)
     const start = mean - 4 * std;
     const end = mean + 4 * std;
     const step = (end - start) / 100;
@@ -3477,7 +3768,6 @@ function runProbabilityCalculation() {
       const y = pdf(x);
       plotData.push(y);
 
-      // 확률 영역 하이라이트 여부 체크
       let isFilled = false;
       if (range === "less" && x <= a) isFilled = true;
       else if (range === "greater" && x >= a) isFilled = true;
@@ -3501,12 +3791,10 @@ function runProbabilityCalculation() {
     }
 
     const pmf = (k) => {
-      // nCr * p^r * (1-p)^(n-r)
       if (k < 0 || k > n) return 0;
       return jStat.binomial.pdf(k, n, p);
     };
 
-    // 이산형 누적 확률 계산
     let cumProb = 0;
     for (let k = 0; k <= n; k++) {
       const prob = pmf(k);
@@ -3578,7 +3866,7 @@ function runProbabilityCalculation() {
       }
     });
   } else {
-    // 이항분포 (막대 그래프)
+    // 이항분포
     AppState.chartInstance = new Chart(ctx, {
       type: "bar",
       data: {
@@ -3642,9 +3930,9 @@ function initWizard() {
         step1.classList.remove("active");
         step3.classList.add("active");
       } else {
-        // 비율 확인의 경우 -> 카이제곱 적합도로 고정 추천
+        // 비율 확인의 경우 -> 교차분석 (카이제곱 독립성 검정) 추천
         currentStep = 4;
-        recommendedMethod = "chisq-fit";
+        recommendedMethod = "chisq-ind";
         step1.classList.remove("active");
         step4.classList.add("active");
         renderRecommendation();
@@ -3669,7 +3957,7 @@ function initWizard() {
       step4.classList.add("active");
 
       if (varType === "continuous") recommendedMethod = "correlation"; // 피어슨 상관분석
-      else recommendedMethod = "chisq-ind"; // 카이제곱 독립성
+      else recommendedMethod = "chisq-ind"; // 교차분석
       renderRecommendation();
     }
 
@@ -3749,15 +4037,9 @@ function initWizard() {
         <li>선형성 가정: 두 변수 관계가 곡선이 아닌 직선 비례 성향이어야 합니다.</li>
         <li>인과 오용 경고: 상관이 아무리 높아도 한 요인이 다른 쪽의 직접적 원인이라고 단정하면 안 됩니다.</li>
       `;
-    } else if (recommendedMethod === "chisq-fit") {
-      nameEl.textContent = "카이제곱 적합도 검정 (Chi-Square Goodness of Fit)";
-      descEl.textContent = "주사위를 던져 나온 범주 빈도가 정육면체의 균등한 수학적 기대분포에 적절히 부합하는지 봅니다.";
-      assumptionsEl.innerHTML = `
-        <li>기대빈도 조건: 기대빈도가 5 미만인 범주 비율이 20%를 넘지 않아야 근사 계산이 올바릅니다.</li>
-      `;
     } else if (recommendedMethod === "chisq-ind") {
-      nameEl.textContent = "카이제곱 독립성 검정 (Chi-Square Independence Test)";
-      descEl.textContent = "성별(남/여)에 따른 선호 급식(양식/일식) 비율처럼, 두 범주형 변수의 결합 빈도 편차가 완전히 무관(독립)한지 혹은 연동하는지 살핍니다.";
+      nameEl.textContent = "교차분석 (카이제곱 독립성 검정)";
+      descEl.textContent = "성별(남/여)에 따른 선호 급식(양식/일식) 비율처럼, 두 범주형 변수의 결합 빈도 격차와 요인 간 상관관계를 규명합니다.";
       assumptionsEl.innerHTML = `
         <li>비교 데이터: 두 변수의 교차 분할표를 사용하여 계산합니다.</li>
         <li>기대빈도 조건: 5 미만인 셀이 20%를 초과할 시 피셔의 정확검정이나 데이터 병합을 권합니다.</li>
