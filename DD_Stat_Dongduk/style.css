@@ -400,6 +400,15 @@ a {
   background-color: hsl(5, 75%, 45%);
 }
 
+.btn-success {
+  background-color: var(--success);
+  color: var(--text-light);
+}
+
+.btn-success:hover {
+  background-color: hsl(135, 75%, 28%);
+}
+
 .btn-icon-label {
   display: flex;
   align-items: center;
