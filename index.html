@@ -121,8 +121,8 @@
             <div id="drop-zone" class="drop-zone card glass">
               <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
               <h3>이곳에 파일을 드래그하여 놓거나 클릭하세요</h3>
-              <p>CSV, XLSX, XLS 파일 지원 (대용량 지원 - 최대 50MB, 5000행*100열)</p>
-              <input type="file" id="file-input" accept=".csv, .xlsx, .xls" class="hidden-input">
+              <p>CSV, XLSX, XLS, JSON(프로젝트) 파일 지원 (대용량 지원 - 최대 50MB, 5000행*100열)</p>
+              <input type="file" id="file-input" accept=".csv, .xlsx, .xls, .json" class="hidden-input">
               <button class="btn btn-primary mt-4">컴퓨터에서 파일 선택</button>
             </div>
             
@@ -160,6 +160,7 @@
                 <button class="btn btn-sm btn-outline" id="btn-add-col"><i class="fa-solid fa-plus"></i> 열 추가</button>
                 <button class="btn btn-sm btn-danger" id="btn-delete-selected"><i class="fa-solid fa-trash-can"></i> 선택 삭제</button>
                 <button class="btn btn-sm btn-success" id="btn-download-data"><i class="fa-solid fa-download"></i> 데이터 내보내기 (Excel)</button>
+                <button class="btn btn-sm btn-info" id="btn-export-project" title="변수 속성, 결측치 설정 및 값 레이블을 통째로 저장"><i class="fa-solid fa-file-export"></i> 프로젝트 저장 (JSON)</button>
               </div>
             </div>
             
