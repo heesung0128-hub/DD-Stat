@@ -22,7 +22,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- CSS Link -->
-  <link rel="stylesheet" href="style.css?v=20260716d">
+  <link rel="stylesheet" href="style.css?v=20261026a">
   
   <!-- External Libraries (CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/jstat@1.9.6/dist/jstat.min.js" crossorigin="anonymous"></script>
@@ -145,6 +145,9 @@
                 </button>
                 <button class="btn btn-outline btn-sm" id="btn-sample-score">
                   <i class="fa-solid fa-medal"></i> 수학 점수 차이 (집단 간 t-검정/ANOVA)
+                </button>
+                <button class="btn btn-outline btn-sm" id="btn-sample-growth">
+                  <i class="fa-solid fa-seedling"></i> 비료량 & 식물 성장 (반복 측정/곡선 회귀)
                 </button>
               </div>
               <div class="template-download-section mt-4" style="border-top: 1px dashed var(--border-glass); padding-top: 12px;">
@@ -364,6 +367,7 @@
                   <option value="correlation">7. 피어슨 상관분석 (두 연속변수 간 선형 연관성)</option>
                   <option value="regression">8. 단순선형회귀분석 (독립변수를 통한 종속변수 예측)</option>
                   <option value="multireg">9. 다중선형회귀분석 (복수 독립변수를 통한 종속변수 예측)</option>
+                  <option value="polyreg">10. 다항회귀분석 (직선 vs 곡선 경향 비교)</option>
                 </select>
               </div>
               
@@ -672,6 +676,14 @@
                       <span class="option-desc">예: "sleep_hours, study_hours, commute_time(여러 요인)으로 성적 예측"</span>
                     </div>
                   </label>
+
+                  <label class="wizard-option-card">
+                    <input type="radio" name="opt-var-type" value="regression-poly">
+                    <div class="option-content">
+                      <span class="option-title">1개의 요인과 결과 사이의 곡선 경향 분석 (다항회귀)</span>
+                      <span class="option-desc">예: "비료량이 늘수록 성장이 커지다가 일정량 이후에는 오히려 줄어드는가?" (증가 폭 둔화, U자/역U자형)</span>
+                    </div>
+                  </label>
                   
                   <label class="wizard-option-card">
                     <input type="radio" name="opt-var-type" value="categorical">
@@ -740,7 +752,7 @@
   </div>
   
   <!-- Script Link -->
-  <script src="stats-helper.js?v=20260716d"></script>
-  <script src="app.js?v=20260716d"></script>
+  <script src="stats-helper.js?v=20261026a"></script>
+  <script src="app.js?v=20261026a"></script>
 </body>
 </html>

@@ -1180,5 +1180,204 @@ const StatsHelper = {
     } catch (err) {
       return { error: err.message || "다중회귀분석 연산 중 오류가 발생했습니다." };
     }
+  },
+
+  // 적합도 결여 검정 (Lack of Fit Test)
+  // 같은 X 값에서 반복 측정된 Y 값들을 이용해 회귀 잔차를 '순수 오차'와 '적합도 결여'로 분해합니다.
+  // numParams: 회귀식의 계수 개수 (절편 포함, 단순선형회귀는 2, k차 다항회귀는 k+1)
+  lackOfFitTest(xData, yData, ssRes, numParams) {
+    const n = xData.length;
+
+    // X 값별로 Y 값 묶기
+    const groups = new Map();
+    for (let i = 0; i < n; i++) {
+      const key = String(xData[i]);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(yData[i]);
+    }
+
+    const m = groups.size; // 서로 다른 X 값의 개수
+    const dfPE = n - m;
+    const dfLOF = m - numParams;
+
+    if (dfPE <= 0) {
+      return {
+        available: false,
+        m,
+        reason: "같은 X 값에서 반복 측정된 데이터가 없어 적합도 결여 검정을 할 수 없습니다. (X 값이 모두 서로 다름)"
+      };
+    }
+    if (dfLOF <= 0) {
+      return {
+        available: false,
+        m,
+        reason: `서로 다른 X 값의 개수(${m}개)가 회귀식의 계수 개수(${numParams}개)보다 많아야 적합도 결여 검정을 할 수 있습니다.`
+      };
+    }
+
+    // 순수 오차: 각 X 값 묶음 안에서 Y가 묶음 평균에서 벗어난 정도
+    let ssPE = 0;
+    groups.forEach(ys => {
+      const groupMean = ys.reduce((a, b) => a + b, 0) / ys.length;
+      ys.forEach(y => {
+        ssPE += Math.pow(y - groupMean, 2);
+      });
+    });
+
+    // 적합도 결여 = 잔차 - 순수 오차 (부동소수점 오차로 음수가 되는 것을 방지)
+    const ssLOF = Math.max(0, ssRes - ssPE);
+    const msPE = ssPE / dfPE;
+    const msLOF = ssLOF / dfLOF;
+
+    if (msPE <= 0) {
+      return {
+        available: false,
+        m,
+        reason: "같은 X 값에서 반복 측정된 Y 값들이 모두 똑같아 순수 오차가 0이므로 적합도 결여 검정을 할 수 없습니다."
+      };
+    }
+
+    const fValue = msLOF / msPE;
+    const pValue = 1 - jStat.centralF.cdf(fValue, dfLOF, dfPE);
+
+    return {
+      available: true,
+      m,
+      ssPE,
+      dfPE,
+      msPE,
+      ssLOF,
+      dfLOF,
+      msLOF,
+      fValue,
+      pValue
+    };
+  },
+
+  // 다항회귀분석 (Polynomial Regression): Y = b0 + b1·X + b2·X² (+ b3·X³)
+  // X의 거듭제곱은 값이 급격히 커져 역행렬 계산이 불안정해지므로,
+  // 표준화한 z = (X - 평균) / 표준편차로 적합한 뒤 계수와 공분산을 원래 X 단위로 되돌립니다.
+  polynomialRegression(xData, yData, order) {
+    const n = xData.length;
+    const k = order + 1; // 계수 개수 (절편 포함)
+
+    if (n < order + 3) {
+      return { error: `${order}차 다항회귀는 최소 ${order + 3}개 이상의 데이터가 필요합니다. (현재 ${n}개)` };
+    }
+    const distinctX = new Set(xData.map(x => String(x))).size;
+    if (distinctX < k) {
+      return { error: `${order}차 다항회귀는 서로 다른 X 값이 최소 ${k}개 이상 필요합니다. (현재 ${distinctX}개)` };
+    }
+
+    const center = xData.reduce((a, b) => a + b, 0) / n;
+    const scale = ss.sampleStandardDeviation(xData) || 1;
+
+    // 설계 행렬 Z: [1, z, z², ...]
+    const Z = xData.map(x => {
+      const z = (x - center) / scale;
+      const row = [];
+      for (let j = 0; j < k; j++) row.push(Math.pow(z, j));
+      return row;
+    });
+    const Y = yData.map(y => [y]);
+
+    try {
+      const ZT = Matrix.transpose(Z);
+      const ZTZ_inv = Matrix.invert(Matrix.multiply(ZT, Z));
+      const a = Matrix.multiply(ZTZ_inv, Matrix.multiply(ZT, Y)).map(r => r[0]);
+
+      // 변환 행렬 T: 원래 X 기준 계수 b = T·a
+      // z^c = Σ_j C(c, j) · X^j · (-center)^(c-j) / scale^c
+      const binom = (nn, rr) => {
+        let res = 1;
+        for (let i = 1; i <= rr; i++) res = res * (nn - rr + i) / i;
+        return res;
+      };
+      const T = [];
+      for (let j = 0; j < k; j++) {
+        T[j] = [];
+        for (let c = 0; c < k; c++) {
+          T[j][c] = c >= j ? binom(c, j) * Math.pow(-center, c - j) / Math.pow(scale, c) : 0;
+        }
+      }
+      const b = Matrix.multiply(T, a.map(v => [v])).map(r => r[0]);
+
+      // 적합값, 잔차, 제곱합
+      const fitted = xData.map((x, i) => Z[i].reduce((sum, zj, j) => sum + a[j] * zj, 0));
+      const residuals = yData.map((y, i) => y - fitted[i]);
+      const meanY = yData.reduce((s, y) => s + y, 0) / n;
+      const ssTot = yData.reduce((s, y) => s + Math.pow(y - meanY, 2), 0);
+      const ssRes = residuals.reduce((s, e) => s + e * e, 0);
+      const ssReg = ssTot - ssRes;
+
+      const dfReg = order;
+      const dfRes = n - k;
+      const dfTot = n - 1;
+      const msReg = ssReg / dfReg;
+      const msRes = ssRes / dfRes;
+
+      const fValue = msRes > 0 ? msReg / msRes : 0;
+      const pValueF = 1 - jStat.centralF.cdf(fValue, dfReg, dfRes);
+      const r2 = ssTot > 0 ? ssReg / ssTot : 0;
+      const adjustedRSquared = 1 - ((1 - r2) * (n - 1)) / dfRes;
+
+      // 원래 X 기준 계수의 공분산: Cov(b) = T · (MS잔차 · (ZᵀZ)⁻¹) · Tᵀ
+      const covB = Matrix.multiply(Matrix.multiply(T, ZTZ_inv), Matrix.transpose(T));
+      const termNames = ["(상수 - Intercept)", "X", "X²", "X³"];
+      const coefficients = b.map((bVal, j) => {
+        const se = Math.sqrt(Math.max(0, msRes * covB[j][j]));
+        const tValue = se > 0 ? bVal / se : 0;
+        const pValue = 2 * (1 - jStat.studentt.cdf(Math.abs(tValue), dfRes));
+        return { name: termNames[j], power: j, b: bVal, se, tValue, pValue };
+      });
+
+      // 정보 기준 (값이 작을수록 우수): AIC = n·ln(SSE/n) + 2k, BIC = n·ln(SSE/n) + k·ln(n)
+      const logLikTerm = ssRes > 0 ? n * Math.log(ssRes / n) : -Infinity;
+      const aic = logLikTerm + 2 * k;
+      const bic = logLikTerm + k * Math.log(n);
+
+      const predict = x => {
+        const z = (x - center) / scale;
+        let y = 0;
+        for (let j = 0; j < k; j++) y += a[j] * Math.pow(z, j);
+        return y;
+      };
+
+      return {
+        method: order === 1 ? "단순선형회귀" : `${order}차 다항회귀`,
+        order,
+        n,
+        numParams: k,
+        coefficients,
+        rSquared: r2,
+        adjustedRSquared,
+        fValue,
+        pValueF,
+        dfReg,
+        dfRes,
+        dfTot,
+        ssReg,
+        ssRes,
+        ssTot,
+        msReg,
+        msRes,
+        aic,
+        bic,
+        residuals,
+        predict
+      };
+    } catch (err) {
+      return { error: err.message || "다항회귀분석 연산 중 오류가 발생했습니다." };
+    }
+  },
+
+  // 위계적 회귀 모형 비교: 축소 모형(reduced)에 항을 추가한 확장 모형(full)의 설명력 증가가 유의한지 F 변화량으로 검정
+  compareNestedModels(reduced, full) {
+    const deltaR2 = full.rSquared - reduced.rSquared;
+    const dfChange = full.dfReg - reduced.dfReg;
+    const msChange = (reduced.ssRes - full.ssRes) / dfChange;
+    const fChange = full.msRes > 0 ? Math.max(0, msChange) / full.msRes : 0;
+    const pValue = 1 - jStat.centralF.cdf(fChange, dfChange, full.dfRes);
+    return { deltaR2, dfChange, dfRes: full.dfRes, fChange, pValue };
   }
 };

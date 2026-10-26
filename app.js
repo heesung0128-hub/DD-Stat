@@ -960,6 +960,17 @@ function initSampleData() {
     processRawData(rows, ["학습_방법", "수학_성적"]);
   });
 
+  // 4) 비료량 & 식물 성장 (Fertilizer, Growth) - 수준별 3회 반복 측정, 곡선형 관계 (가상 데이터)
+  document.getElementById("btn-sample-growth").addEventListener("click", () => {
+    const growth = [20, 20, 19.5, 29.5, 31, 29.7, 39.9, 41.4, 42.5, 45.8, 48.1, 46.6, 55.3, 52, 57.5, 60, 57.1, 55.3, 58.9, 61.3, 59.7, 58, 62.4, 59.5, 56.2, 57.6, 60.3, 54.9, 56.6, 52.3];
+
+    const rows = growth.map((g, idx) => ({
+      "비료량(g)": Math.floor(idx / 3) * 10,
+      "식물_성장(cm)": g
+    }));
+    processRawData(rows, ["비료량(g)", "식물_성장(cm)"]);
+  });
+
   // 데이터 초기화 버튼
   document.getElementById("btn-reset-data").addEventListener("click", () => {
     if (confirm("정말로 모든 데이터를 초기화하시겠습니까?")) {
@@ -2608,6 +2619,32 @@ function updateInferMethodOptions() {
         </div>
       `;
       break;
+
+    case "polyreg": {
+      // 종속변수는 기본값으로 두 번째 수치형 변수를 선택해 X와 겹치지 않게 함
+      const yOptionsHTML = AppState.headers
+        .filter(h => AppState.colTypes[h] === "continuous" || AppState.colTypes[h] === "likert")
+        .map((h, idx) => `<option value="${h}"${idx === 1 ? " selected" : ""}>${h}</option>`).join("");
+      container.innerHTML = `
+        <div class="form-group">
+          <label for="infer-select-var1">독립변수 (X, 연속형):</label>
+          <select id="infer-select-var1" class="form-control mt-1">${numOptionsHTML}</select>
+        </div>
+        <div class="form-group mt-3">
+          <label for="infer-select-var2">종속변수 (Y, 연속형):</label>
+          <select id="infer-select-var2" class="form-control mt-1">${yOptionsHTML}</select>
+        </div>
+        <div class="form-group mt-3">
+          <label for="infer-poly-order">비교할 최고 차수:</label>
+          <select id="infer-poly-order" class="form-control mt-1">
+            <option value="2">2차까지 (직선 vs 2차 곡선)</option>
+            <option value="3">3차까지 (직선 vs 2차 vs 3차 곡선)</option>
+          </select>
+          <p class="input-tip mt-1">같은 X 값에서 반복 측정한 데이터가 있으면 <strong>적합도 결여 검정</strong>도 함께 수행됩니다.</p>
+        </div>
+      `;
+      break;
+    }
   }
 
   // 저장된 이전의 폼 값과 가설 복원
@@ -2667,6 +2704,9 @@ function runInferentialAnalysis() {
       break;
     case "multireg":
       runMultipleRegressionAnalysis();
+      break;
+    case "polyreg":
+      runPolynomialRegressionAnalysis();
       break;
   }
 }
@@ -4039,6 +4079,71 @@ function runCorrelationAnalysis() {
 }
 
 // 8) 단순선형회귀분석 실행
+// 분산분석표의 잔차 행 아래에 들어갈 적합도 결여 / 순수 오차 행 (6열 표 기준)
+function buildLackOfFitRowsHtml(lof) {
+  const cellStyle = "border:1px solid var(--border-glass); text-align:center; padding:8px;";
+  const labelStyle = "border:1px solid var(--border-glass); padding:8px 8px 8px 24px;";
+
+  if (!lof.available) {
+    return `
+            <tr>
+              <td colspan="6" style="border:1px solid var(--border-glass); padding:8px 8px 8px 24px; font-size:11px; color:var(--text-muted);">
+                <i class="fa-solid fa-circle-info"></i> 적합도 결여 검정: ${lof.reason}
+              </td>
+            </tr>`;
+  }
+
+  const sigLOF = lof.pValue < 0.05 ? "유의함" : "유의하지 않음";
+  return `
+            <tr>
+              <td style="${labelStyle}">├ 적합도 결여 (Lack of Fit)</td>
+              <td style="${cellStyle}">${lof.ssLOF.toFixed(3)}</td>
+              <td style="${cellStyle}">${lof.dfLOF}</td>
+              <td style="${cellStyle}">${lof.msLOF.toFixed(3)}</td>
+              <td style="${cellStyle}"><strong>${lof.fValue.toFixed(3)}</strong></td>
+              <td style="${cellStyle} color:${lof.pValue < 0.05 ? 'var(--danger)' : 'inherit'};"><strong>${lof.pValue.toFixed(4)}</strong><br><span style="font-size:9px;font-weight:normal;">(${sigLOF})</span></td>
+            </tr>
+            <tr>
+              <td style="${labelStyle}">└ 순수 오차 (Pure Error)</td>
+              <td style="${cellStyle}">${lof.ssPE.toFixed(3)}</td>
+              <td style="${cellStyle}">${lof.dfPE}</td>
+              <td style="${cellStyle}">${lof.msPE.toFixed(3)}</td>
+              <td style="${cellStyle}"></td>
+              <td style="${cellStyle}"></td>
+            </tr>`;
+}
+
+// 적합도 결여 검정 결과 해석 문단
+function buildLackOfFitInterpretationHtml(lof, modelLabel, suggestPolynomial) {
+  if (!lof.available) {
+    return `<p><strong>[적합도 결여 검정]</strong> ${lof.reason} 같은 X 값에서 여러 번 반복 측정한 데이터가 있으면 '${modelLabel}'이 데이터의 패턴을 충분히 설명하는지 검정할 수 있습니다.</p>`;
+  }
+
+  const fText = `F(${lof.dfLOF}, ${lof.dfPE}) = ${lof.fValue.toFixed(2)}, p = ${lof.pValue.toFixed(3)}`;
+  if (lof.pValue < 0.05) {
+    return `
+      <p><strong>[적합도 결여 검정]</strong> 서로 다른 X 값 ${lof.m}개에서 반복 측정된 데이터로 잔차를 분해한 결과, 적합도 결여가 통계적으로 <strong>유의합니다</strong> (${fText}).
+      즉 반복 측정의 우연한 흔들림(순수 오차)만으로는 설명되지 않는 체계적인 어긋남이 남아 있어, <strong>'${modelLabel}'이 데이터의 패턴을 충분히 설명하지 못합니다.</strong></p>
+      ${suggestPolynomial ? `<p>곡선 형태의 관계일 가능성이 있으므로 <strong>'10. 다항회귀분석 (직선 vs 곡선 경향 비교)'</strong>으로 2차·3차 모형과 비교해 보세요.
+      <button class="btn btn-xs btn-outline" onclick="switchToPolynomialRegression()"><i class="fa-solid fa-bezier-curve"></i> 다항회귀분석으로 이동</button></p>` : ""}
+    `;
+  }
+  return `<p><strong>[적합도 결여 검정]</strong> 서로 다른 X 값 ${lof.m}개에서 반복 측정된 데이터로 잔차를 분해한 결과, 적합도 결여는 통계적으로 <strong>유의하지 않습니다</strong> (${fText}). 남은 잔차는 반복 측정의 우연한 흔들림(순수 오차) 수준이므로 <strong>'${modelLabel}'으로 데이터의 패턴을 설명하기에 충분합니다.</strong></p>`;
+}
+
+// 단순회귀 결과에서 다항회귀분석으로 전환 (선택한 X, Y 변수 유지)
+function switchToPolynomialRegression() {
+  const var1 = document.getElementById("infer-select-var1");
+  const var2 = document.getElementById("infer-select-var2");
+  AppState.inferState.method = "polyreg";
+  AppState.inferState.variables = {};
+  if (var1) AppState.inferState.variables["infer-select-var1"] = var1.value;
+  if (var2) AppState.inferState.variables["infer-select-var2"] = var2.value;
+  document.getElementById("infer-method").value = "polyreg";
+  updateInferMethodOptions();
+  document.getElementById("infer-method").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
 function runRegressionAnalysis() {
   const var1 = document.getElementById("infer-select-var1").value;
   const var2 = document.getElementById("infer-select-var2").value;
@@ -4146,10 +4251,11 @@ function runRegressionAnalysis() {
     </tr>
   `;
 
-  // 3) 분산분석 ANOVA 표
+  // 3) 분산분석 ANOVA 표 (반복 측정이 있으면 잔차를 적합도 결여 / 순수 오차로 분해)
   const msReg = reg.ssReg / reg.dfReg;
   const msRes = reg.ssRes / reg.dfRes;
   const dfTot = reg.dfReg + reg.dfRes;
+  const lof = StatsHelper.lackOfFitTest(data1, data2, reg.ssRes, 2);
   let anovaHtml = `
     <tr><th colspan="4" style="padding-top:15px;">3. 분산분석 (ANOVA Table)</th></tr>
     <tr>
@@ -4180,6 +4286,7 @@ function runRegressionAnalysis() {
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.dfRes}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${msRes.toFixed(3)}</td>
             </tr>
+            ${buildLackOfFitRowsHtml(lof)}
             <tr class="highlight-row">
               <td style="border:1px solid var(--border-glass); padding:8px;"><strong>합계 (Total)</strong></td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.ssTot.toFixed(3)}</td>
@@ -4326,6 +4433,7 @@ function runRegressionAnalysis() {
     <p>분석 결과 도출된 회귀모형은 통계적으로 <strong>${isSig ? "유의미하게 타당합니다" : "유의미한 타당성을 얻지 못했습니다"}</strong> (F = ${reg.fValue.toFixed(2)}, p = ${reg.pValueF.toFixed(3)}).</p>
     <p>이 모형의 설명력(결정계수 R²)은 <strong>${reg.rSquared.toFixed(3)}</strong>이며, 이는 독립변수 '${var1}'이 종속변수 '${var2}' 전체 변동의 약 <strong>${(reg.rSquared * 100).toFixed(1)}%</strong>를 설명(예측)해내고 있음을 의미합니다.</p>
     <p>회귀 기울기 값은 <strong>${reg.slope.toFixed(3)}</strong>로 나타나, '${var1}'가 1단위 증가할 때마다 '${var2}'가 약 <strong>${reg.slope.toFixed(2)}</strong>만큼 ${reg.slope > 0 ? '증가' : '감소'}하는 선형 관계가 나타날 것으로 추정됩니다.</p>
+    ${buildLackOfFitInterpretationHtml(lof, "단순 직선 모형", true)}
   `;
 
   // 6. 경고판
@@ -4335,6 +4443,383 @@ function runRegressionAnalysis() {
   alertBox.style.color = "var(--danger)";
   alertBox.style.borderColor = "var(--danger)";
   alertTxt.textContent = "CRITICAL WARNING (인과 비약 방지): 회귀 분석은 예측 방정식 형태로 인과를 흉내 내지만, 실제로는 통계적 '선형 패턴'을 수치화한 것에 불과합니다. 변수 간의 논리적 메커니즘과 이론적 기반이 없거나 교란 변수를 차단하지 못했다면 결코 완벽한 원인-결과(인과)로 단정할 수 없으며 오직 상관성에 준해 보고해야 합니다.";
+}
+
+// 10) 다항회귀분석 실행 (직선 vs 곡선 경향 비교)
+function runPolynomialRegressionAnalysis() {
+  const var1 = document.getElementById("infer-select-var1").value;
+  const var2 = document.getElementById("infer-select-var2").value;
+  const maxOrder = parseInt(document.getElementById("infer-poly-order").value, 10) || 2;
+
+  if (!var1 || !var2 || var1 === var2) {
+    alert("독립변수(X)와 종속변수(Y)를 서로 다른 변수로 선택해 주세요.");
+    return;
+  }
+
+  const xData = [];
+  const yData = [];
+  AppState.data.forEach(row => {
+    if (isMissingValue(var1, row[var1]) || isMissingValue(var2, row[var2])) {
+      return; // 결측값 행 제외
+    }
+    const vx = parseFloat(row[var1]);
+    const vy = parseFloat(row[var2]);
+    if (!isNaN(vx) && !isNaN(vy)) {
+      xData.push(vx);
+      yData.push(vy);
+    }
+  });
+
+  // 1. 모형 1(선형) ~ 최고 차수 모형까지 적합
+  const models = [];
+  for (let order = 1; order <= maxOrder; order++) {
+    const model = StatsHelper.polynomialRegression(xData, yData, order);
+    if (model.error) {
+      alert(model.error);
+      return;
+    }
+    models.push(model);
+  }
+  const n = xData.length;
+
+  // 2. 위계적 비교 (모형 k-1 → 모형 k) 및 각 모형의 적합도 결여 검정
+  const comparisons = models.map((m, i) => i === 0 ? null : StatsHelper.compareNestedModels(models[i - 1], m));
+  const lofs = models.map(m => StatsHelper.lackOfFitTest(xData, yData, m.ssRes, m.numParams));
+
+  // 3. 자동 모형 선택: 가장 높은 차수부터 내려오며, 그 차수의 항을 추가한 것이 유의한 첫 모형을 채택
+  let chosenIdx = 0;
+  for (let i = models.length - 1; i >= 1; i--) {
+    if (comparisons[i].pValue < 0.05) {
+      chosenIdx = i;
+      break;
+    }
+  }
+  const chosen = models[chosenIdx];
+  const chosenLof = lofs[chosenIdx];
+  const bestAicIdx = models.reduce((best, m, i) => m.aic < models[best].aic ? i : best, 0);
+  const bestBicIdx = models.reduce((best, m, i) => m.bic < models[best].bic ? i : best, 0);
+
+  const modelTitles = ["", "모형 1 (선형: X)", "모형 2 (2차: X + X²)", "모형 3 (3차: X + X² + X³)"];
+  const modelShortNames = ["", "단순 선형 모형", "2차 다항 회귀 모형", "3차 다항 회귀 모형"];
+  const fmtCoef = v => (v === 0 || Math.abs(v) >= 0.001) ? v.toFixed(4) : v.toExponential(3);
+  const fmtP = p => p < 0.0001 ? "< .0001" : p.toFixed(4);
+  const cellStyle = "border:1px solid var(--border-glass); text-align:center; padding:8px;";
+  const labelStyle = "border:1px solid var(--border-glass); padding:8px;";
+  const headStyle = "background-color:rgba(114, 46, 209, 0.05);";
+
+  // 4. 가정 점검 (선택된 모형 기준)
+  const checks = [];
+  const residNorm = StatsHelper.checkNormality(chosen.residuals);
+  residNorm.reason = `선택된 모형(${modelShortNames[chosen.order]})의 잔차 정규성: ` + residNorm.reason;
+  checks.push(residNorm);
+  const minRecommendedN = (maxOrder + 1) * 3;
+  checks.push({
+    passed: n >= minRecommendedN,
+    severity: n >= minRecommendedN ? "success" : "warning",
+    reason: n >= minRecommendedN
+      ? `표본 크기(n=${n})가 ${maxOrder}차 모형의 계수 개수(${maxOrder + 1}개) 대비 충분합니다 (권장 ${minRecommendedN}개 이상).`
+      : `표본 크기(n=${n})가 ${maxOrder}차 모형의 계수 개수(${maxOrder + 1}개)에 비해 적습니다 (권장 ${minRecommendedN}개 이상). 차수가 높을수록 곡선이 점을 억지로 통과하는 과적합이 생길 수 있습니다.`
+  });
+  if (chosenLof.available) {
+    checks.push({
+      passed: chosenLof.pValue >= 0.05,
+      severity: chosenLof.pValue >= 0.05 ? "success" : "danger",
+      reason: `적합도 결여 검정(선택된 모형): F(${chosenLof.dfLOF}, ${chosenLof.dfPE}) = ${chosenLof.fValue.toFixed(2)}, p = ${chosenLof.pValue.toFixed(3)} → ${chosenLof.pValue >= 0.05 ? "모형이 데이터 패턴을 충분히 설명합니다." : "모형으로 설명되지 않는 체계적 어긋남이 남아 있습니다."}`
+    });
+  }
+  renderAssumptionDashboard(checks);
+
+  // 5. 결과 표
+  const table = document.getElementById("infer-result-table");
+
+  // 1) 모형 비교 요약표
+  let compareRows = "";
+  models.forEach((m, i) => {
+    const isChosen = i === chosenIdx;
+    const cmp = comparisons[i];
+    const lof = lofs[i];
+    compareRows += `
+            <tr style="${isChosen ? 'background-color:rgba(114, 46, 209, 0.08); font-weight:bold;' : ''}">
+              <td style="${labelStyle}">${isChosen ? '⭐ ' : ''}<strong>${modelTitles[m.order]}</strong></td>
+              <td style="${cellStyle}">${m.rSquared.toFixed(4)}</td>
+              <td style="${cellStyle}">${m.adjustedRSquared.toFixed(4)}</td>
+              <td style="${cellStyle}">${cmp ? cmp.deltaR2.toFixed(4) : '-'}</td>
+              <td style="${cellStyle}">${cmp ? cmp.fChange.toFixed(3) : '-'}</td>
+              <td style="${cellStyle} color:${cmp && cmp.pValue < 0.05 ? 'var(--primary)' : 'inherit'};">${cmp ? `<strong>${fmtP(cmp.pValue)}</strong>` : '-'}</td>
+              <td style="${cellStyle}">${i === bestAicIdx ? `<strong>${m.aic.toFixed(2)}</strong>` : m.aic.toFixed(2)} / ${i === bestBicIdx ? `<strong>${m.bic.toFixed(2)}</strong>` : m.bic.toFixed(2)}</td>
+              <td style="${cellStyle} color:${lof.available && lof.pValue < 0.05 ? 'var(--danger)' : 'inherit'};">${lof.available ? fmtP(lof.pValue) : '-'}</td>
+            </tr>`;
+  });
+
+  let compareHtml = `
+    <tr><th colspan="4">1. 모형 비교 요약표 (Model Summary Comparison)</th></tr>
+    <tr>
+      <td colspan="4" style="padding:0; border:none;">
+        <table class="data-table" style="font-size:11px; width:100%; border-collapse:collapse; margin:0;">
+          <thead>
+            <tr style="${headStyle}">
+              <th style="${labelStyle}">모형</th>
+              <th style="${cellStyle}">R²</th>
+              <th style="${cellStyle}">조정된 R²</th>
+              <th style="${cellStyle}">R² 변화량 (ΔR²)</th>
+              <th style="${cellStyle}">F 변화량</th>
+              <th style="${cellStyle}">F 변화량 유의확률</th>
+              <th style="${cellStyle}">AIC / BIC</th>
+              <th style="${cellStyle}">적합도 결여 p</th>
+            </tr>
+          </thead>
+          <tbody>${compareRows}
+          </tbody>
+        </table>
+        <p style="font-size:10px; color:var(--text-muted); margin:6px 0 0; line-height:1.5;">
+          · ΔR²와 F 변화량은 바로 앞 모형에 한 차수 높은 항을 추가했을 때의 설명력 증가와 그 유의성입니다 (위계적 회귀분석).<br>
+          · AIC/BIC는 모형의 복잡도(계수 개수) 대비 설명력을 평가하며 <strong>값이 작을수록 우수</strong>합니다. 프로그램마다 상수항 정의가 달라 절댓값은 다를 수 있으니 모형끼리의 비교에만 사용하세요.<br>
+          · ⭐ 표시는 아래 자동 모형 선택 기준으로 채택된 모형입니다.
+        </p>
+      </td>
+    </tr>
+  `;
+
+  // 2) 선택된 모형의 분산분석표 (적합도 결여 분해 포함)
+  let anovaHtml = `
+    <tr><th colspan="4" style="padding-top:15px;">2. 분산분석 (ANOVA Table) - ${modelTitles[chosen.order]}</th></tr>
+    <tr>
+      <td colspan="4" style="padding:0; border:none;">
+        <table class="data-table" style="font-size:11px; width:100%; border-collapse:collapse; margin:0;">
+          <thead>
+            <tr style="${headStyle}">
+              <th style="${labelStyle}">구분</th>
+              <th style="${cellStyle}">제곱합 (SS)</th>
+              <th style="${cellStyle}">자유도 (df)</th>
+              <th style="${cellStyle}">평균제곱 (MS)</th>
+              <th style="${cellStyle}">F</th>
+              <th style="${cellStyle}">유의확률 (Sig.)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="${labelStyle}"><strong>회귀 (Regression)</strong></td>
+              <td style="${cellStyle}">${chosen.ssReg.toFixed(3)}</td>
+              <td style="${cellStyle}">${chosen.dfReg}</td>
+              <td style="${cellStyle}">${chosen.msReg.toFixed(3)}</td>
+              <td style="${cellStyle}"><strong>${chosen.fValue.toFixed(3)}</strong></td>
+              <td style="${cellStyle} color:${chosen.pValueF < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${fmtP(chosen.pValueF)}</strong></td>
+            </tr>
+            <tr>
+              <td style="${labelStyle}"><strong>잔차 (Residual)</strong></td>
+              <td style="${cellStyle}">${chosen.ssRes.toFixed(3)}</td>
+              <td style="${cellStyle}">${chosen.dfRes}</td>
+              <td style="${cellStyle}">${chosen.msRes.toFixed(3)}</td>
+              <td style="${cellStyle}"></td>
+              <td style="${cellStyle}"></td>
+            </tr>
+            ${buildLackOfFitRowsHtml(chosenLof)}
+            <tr class="highlight-row">
+              <td style="${labelStyle}"><strong>합계 (Total)</strong></td>
+              <td style="${cellStyle}">${chosen.ssTot.toFixed(3)}</td>
+              <td style="${cellStyle}">${chosen.dfTot}</td>
+              <td style="${cellStyle}"></td>
+              <td style="${cellStyle}"></td>
+              <td style="${cellStyle}"></td>
+            </tr>
+          </tbody>
+        </table>
+      </td>
+    </tr>
+  `;
+
+  // 3) 다항 회귀계수 표 (2차 이상 모형, 최고차항 강조)
+  let coeffRows = "";
+  models.slice(1).forEach(m => {
+    m.coefficients.forEach((c, j) => {
+      const isTop = c.power === m.order;
+      const sigText = c.pValue < 0.05 ? "유의함" : "유의하지 않음";
+      coeffRows += `
+            <tr style="${isTop ? 'background-color:rgba(114, 46, 209, 0.08);' : ''}">
+              ${j === 0 ? `<td rowspan="${m.coefficients.length}" style="${labelStyle} vertical-align:middle;"><strong>${modelTitles[m.order]}</strong>${models[chosenIdx] === m ? '<br><span style="font-size:9px;">⭐ 채택</span>' : ''}</td>` : ''}
+              <td style="${labelStyle}">${isTop ? `<strong>${c.name} (최고차항)</strong>` : c.name}</td>
+              <td style="${cellStyle}${isTop ? ' font-weight:bold;' : ''}">${fmtCoef(c.b)}</td>
+              <td style="${cellStyle}">${fmtCoef(c.se)}</td>
+              <td style="${cellStyle}${isTop ? ' font-weight:bold;' : ''}">${c.tValue.toFixed(3)}</td>
+              <td style="${cellStyle} color:${isTop && c.pValue < 0.05 ? 'var(--primary)' : 'inherit'};">${isTop ? `<strong>${fmtP(c.pValue)}</strong><br><span style="font-size:9px;font-weight:normal;">(${sigText})</span>` : fmtP(c.pValue)}</td>
+            </tr>`;
+    });
+  });
+
+  let coeffHtml = `
+    <tr><th colspan="4" style="padding-top:15px;">3. 다항 회귀계수 (Polynomial Coefficients)</th></tr>
+    <tr>
+      <td colspan="4" style="padding:0; border:none;">
+        <table class="data-table" style="font-size:11px; width:100%; border-collapse:collapse; margin:0;">
+          <thead>
+            <tr style="${headStyle}">
+              <th style="${labelStyle}">모형</th>
+              <th style="${labelStyle}">항</th>
+              <th style="${cellStyle}">비표준화 계수 (B)</th>
+              <th style="${cellStyle}">표준오차 (SE)</th>
+              <th style="${cellStyle}">t</th>
+              <th style="${cellStyle}">유의확률 (Sig.)</th>
+            </tr>
+          </thead>
+          <tbody>${coeffRows}
+          </tbody>
+        </table>
+        <p style="font-size:10px; color:var(--text-muted); margin:6px 0 0; line-height:1.5;">
+          · 색칠된 줄(최고차항)의 유의확률이 p &lt; 0.05여야 그 차수의 곡선을 쓸 근거가 있습니다. 최고차항이 유의하지 않다면 더 단순한 모형을 쓰는 것이 바람직합니다.<br>
+          · 한 차수 높은 항을 하나 추가하는 비교에서는 최고차항의 t-검정과 F 변화량 검정이 같은 검정이므로 두 유의확률이 일치합니다 (F = t²).
+        </p>
+      </td>
+    </tr>
+  `;
+
+  // 채택된 모형의 회귀 방정식
+  const xPowLabel = ["", "X", "X²", "X³"];
+  let equation = `Y (${var2}) = ${fmtCoef(chosen.coefficients[0].b)}`;
+  chosen.coefficients.slice(1).forEach(c => {
+    equation += ` ${c.b < 0 ? "−" : "+"} ${fmtCoef(Math.abs(c.b))}·${xPowLabel[c.power]}`;
+  });
+  equation += `  (X = ${var1})`;
+
+  table.innerHTML = `
+    ${compareHtml}
+    ${anovaHtml}
+    ${coeffHtml}
+    <tr><td colspan="4" style="padding-top:10px; border:none;"></td></tr>
+    <tr><td colspan="4" style="font-size:12px; font-weight:bold; border:none; color:var(--primary);">
+      채택된 회귀 방정식 (${modelShortNames[chosen.order]}): ${equation}
+    </td></tr>
+  `;
+
+  // 6. 시각화: 산점도 + 직선 + 곡선 동시 표시
+  const chartCard = document.getElementById("infer-chart-card");
+  chartCard.classList.remove("hidden");
+  const ctx = document.getElementById("infer-chart");
+  if (AppState.chartInstance) AppState.chartInstance.destroy();
+
+  const minX = Math.min(...xData);
+  const maxX = Math.max(...xData);
+  const curveColors = ["", "#94a3b8", "#e53e3e", "#38a169"];
+  const curveLabels = ["", "모형 1: 선형 회귀 직선", "모형 2: 2차 회귀 곡선", "모형 3: 3차 회귀 곡선"];
+  const curveDatasets = models.map((m, i) => {
+    const pts = [];
+    const steps = m.order === 1 ? 1 : 100;
+    for (let s = 0; s <= steps; s++) {
+      const xv = minX + (maxX - minX) * (s / steps);
+      pts.push({ x: xv, y: m.predict(xv) });
+    }
+    return {
+      label: curveLabels[m.order] + (i === chosenIdx ? " (채택)" : ""),
+      data: pts,
+      type: "line",
+      borderColor: curveColors[m.order],
+      borderWidth: i === chosenIdx ? 3.5 : 2,
+      borderDash: m.order === 1 ? [6, 4] : [],
+      fill: false,
+      pointRadius: 0,
+      tension: 0
+    };
+  });
+
+  const isDark = AppState.theme === "dark";
+  const textColor = isDark ? "#c8cdd4" : "#2d3748";
+  const gridColor = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)";
+
+  AppState.chartInstance = new Chart(ctx, {
+    type: "scatter",
+    data: {
+      datasets: [
+        {
+          label: "관측치",
+          data: xData.map((xv, i) => ({ x: xv, y: yData[i] })),
+          backgroundColor: "rgba(114, 46, 209, 0.7)",
+          borderColor: "rgba(114, 46, 209, 1)",
+          borderWidth: 1,
+          pointRadius: 5
+        },
+        ...curveDatasets
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: textColor } },
+        title: { display: true, text: `직선 vs 곡선 회귀 비교: ${var1} → ${var2}`, color: textColor }
+      },
+      scales: {
+        x: { type: "linear", title: { display: true, text: var1, color: textColor }, grid: { color: gridColor }, ticks: { color: textColor } },
+        y: { title: { display: true, text: var2, color: textColor }, grid: { color: gridColor }, ticks: { color: textColor } }
+      }
+    }
+  });
+
+  // 7. 한국어 해석 (자동 모형 선택 결과)
+  let decisionHtml = "";
+  if (chosen.order === 1) {
+    const cmp2 = comparisons[1];
+    decisionHtml = `<p><strong>[모형 선택 결과] 단순 선형 회귀 모형 채택 권장</strong><br>
+      2차항(X²) 추가에 따른 설명력 증가가 통계적으로 유의하지 않습니다 (ΔR² = ${cmp2.deltaR2.toFixed(4)}, F 변화량 = ${cmp2.fChange.toFixed(2)}, p = ${cmp2.pValue.toFixed(3)})${maxOrder >= 3 ? `. 3차항(X³)을 추가한 경우도 유의하지 않았습니다 (p = ${comparisons[2].pValue.toFixed(3)})` : ""}.
+      복잡한 곡선 모형 대신 <strong>단순 선형 회귀 모형</strong>을 사용하는 것이 적절합니다.</p>`;
+  } else {
+    const cmp = comparisons[chosenIdx];
+    const higherNote = chosenIdx < models.length - 1
+      ? ` 한편 3차항(X³)을 추가한 것은 유의하지 않아 (p = ${comparisons[chosenIdx + 1].pValue.toFixed(3)}) 더 복잡한 모형은 필요하지 않습니다.`
+      : "";
+    decisionHtml = `<p><strong>[모형 선택 결과] ${modelShortNames[chosen.order]} 채택 권장</strong><br>
+      ${xPowLabel[chosen.order]}항의 회귀계수가 유의하고 (${chosen.coefficients[chosen.order].pValue < 0.0001 ? "p < .0001" : `p = ${chosen.coefficients[chosen.order].pValue.toFixed(4)}`}), ${xPowLabel[chosen.order]}항 추가에 따른 설명력 증가도 유의합니다 (ΔR² = ${cmp.deltaR2.toFixed(4)}, F 변화량 = ${cmp.fChange.toFixed(2)}).
+      ${modelShortNames[chosen.order]}이 데이터의 곡선 패턴(변화율 둔화/반전)을 선형 모형보다 통계적으로 유의미하게 더 잘 설명합니다.${higherNote}</p>`;
+  }
+
+  // 곡선 모양 설명
+  let shapeHtml = "";
+  if (chosen.order === 2) {
+    const b1 = chosen.coefficients[1].b;
+    const b2 = chosen.coefficients[2].b;
+    const vertexX = -b1 / (2 * b2);
+    const vertexY = chosen.predict(vertexX);
+    if (vertexX > minX && vertexX < maxX) {
+      shapeHtml = b2 < 0
+        ? `<p><strong>[곡선의 모양] 역U자형 (위로 볼록)</strong> — '${var1}'이(가) 약 <strong>${vertexX.toFixed(2)}</strong>일 때 '${var2}'이(가) 최댓값(약 ${vertexY.toFixed(2)})에 이르고, 그 이후에는 오히려 감소하는 경향이 나타납니다.</p>`
+        : `<p><strong>[곡선의 모양] U자형 (아래로 볼록)</strong> — '${var1}'이(가) 약 <strong>${vertexX.toFixed(2)}</strong>일 때 '${var2}'이(가) 최솟값(약 ${vertexY.toFixed(2)})에 이르고, 그 이후에는 다시 증가하는 경향이 나타납니다.</p>`;
+    } else {
+      const increasing = chosen.predict(maxX) > chosen.predict(minX);
+      let shapeText;
+      if (b2 < 0) shapeText = increasing ? "증가하지만 증가 폭이 점점 줄어드는(포화) 형태" : "감소하며 감소 폭이 점점 커지는 형태";
+      else shapeText = increasing ? "증가하며 증가 폭이 점점 커지는(가속) 형태" : "감소하지만 감소 폭이 점점 줄어드는 형태";
+      shapeHtml = `<p><strong>[곡선의 모양]</strong> 관측된 '${var1}'의 범위(${minX} ~ ${maxX}) 안에서 '${var2}'은(는) <strong>${shapeText}</strong>를 보입니다. (곡선의 꼭짓점 X ≈ ${vertexX.toFixed(2)}는 관측 범위 밖에 있습니다.)</p>`;
+    }
+  } else if (chosen.order === 3) {
+    const inflectionX = -chosen.coefficients[2].b / (3 * chosen.coefficients[3].b);
+    const inRange = inflectionX > minX && inflectionX < maxX;
+    shapeHtml = `<p><strong>[곡선의 모양] S자형 (굽은 방향이 바뀌는 곡선)</strong> — 3차 곡선은 변곡점을 기준으로 볼록한 방향이 바뀝니다. 변곡점은 X ≈ <strong>${inflectionX.toFixed(2)}</strong>로, ${inRange ? "관측 범위 안에 있어 이 지점 전후로 변화의 양상이 달라집니다." : "관측 범위 밖에 있습니다."}</p>`;
+  }
+
+  // AIC/BIC 일치 여부
+  const aicAgrees = bestAicIdx === chosenIdx;
+  const bicAgrees = bestBicIdx === chosenIdx;
+  const icHtml = `<p><strong>[정보 기준 참고]</strong> AIC가 가장 작은 모형은 <strong>${modelTitles[models[bestAicIdx].order]}</strong>, BIC가 가장 작은 모형은 <strong>${modelTitles[models[bestBicIdx].order]}</strong>입니다.
+    ${aicAgrees && bicAgrees ? "검정 결과와 정보 기준이 모두 같은 모형을 가리키므로 선택의 근거가 탄탄합니다." : "검정 결과와 정보 기준이 일부 다른 모형을 가리키므로, 그래프의 모양과 연구 이론을 함께 고려해 최종 모형을 판단하세요."}</p>`;
+
+  const overfitHtml = chosen.order >= 2 && n < (chosen.order + 1) * 3
+    ? `<p style="color:var(--danger);"><strong>[과적합 주의]</strong> 데이터 개수(${n}개)에 비해 ${modelShortNames[chosen.order]}의 계수가 많은 편입니다. 곡선이 점을 억지로 통과해 설명력이 부풀려졌을 수 있으므로 더 많은 데이터를 모아 다시 확인해 보세요.</p>`
+    : "";
+
+  document.getElementById("infer-korean-interpretation").innerHTML = `
+    <p>독립변수 <strong>'${var1}'</strong>와(과) 종속변수 <strong>'${var2}'</strong> 사이의 관계가 직선인지 곡선인지 알아보기 위해 선형 모형과 ${maxOrder === 3 ? "2차·3차" : "2차"} 다항 회귀 모형을 차례로 적합하고 비교했습니다 (n = ${n}).</p>
+    ${decisionHtml}
+    ${shapeHtml}
+    <p>채택된 모형의 설명력(R²)은 <strong>${chosen.rSquared.toFixed(3)}</strong>로, '${var2}' 전체 변동의 약 <strong>${(chosen.rSquared * 100).toFixed(1)}%</strong>를 설명합니다.${chosenIdx > 0 ? ` (선형 모형 R² = ${models[0].rSquared.toFixed(3)})` : ""}</p>
+    ${icHtml}
+    ${buildLackOfFitInterpretationHtml(chosenLof, modelShortNames[chosen.order], false)}
+    ${overfitHtml}
+  `;
+
+  // 8. 경고판 (범위 밖 예측 및 인과 단정 주의)
+  const alertBox = document.getElementById("interpretation-limit-box");
+  const alertTxt = document.getElementById("interpretation-limit-text");
+  alertBox.style.backgroundColor = "var(--danger-light)";
+  alertBox.style.color = "var(--danger)";
+  alertBox.style.borderColor = "var(--danger)";
+  alertTxt.textContent = `주의: 다항 회귀 곡선은 관측된 '${var1}'의 범위(${minX} ~ ${maxX}) 안에서만 의미가 있습니다. 범위 밖에서는 곡선이 급격히 치솟거나 꺾여 예측이 크게 빗나갈 수 있으므로 외삽(범위 밖 예측)은 피해야 합니다. 또한 곡선 관계가 확인되더라도 그것만으로 원인-결과(인과)를 단정할 수는 없습니다.`;
 }
 
 // 9) 다중선형회귀분석 실행
@@ -4958,6 +5443,7 @@ function initWizard() {
           if (varType === "continuous") recommendedMethod = "correlation"; // 피어슨 상관분석
           else if (varType === "regression-simple") recommendedMethod = "regression"; // 단순선형회귀분석
           else if (varType === "regression-multi") recommendedMethod = "multireg"; // 다중선형회귀분석
+          else if (varType === "regression-poly") recommendedMethod = "polyreg"; // 다항회귀분석
           else recommendedMethod = "chisq-ind"; // 교차분석
           renderRecommendation();
         }
@@ -5078,6 +5564,16 @@ function initWizard() {
         assumptionsEl.innerHTML = `
           <li>다중공선성 주의: 독립변수들끼리 강력한 상관이 얽혀 통계가 파괴되지 않게 검증해야 합니다 (VIF 분석 등).</li>
           <li>가정 사항: 오차항의 독립성, 정규성, 등분산성을 점검합니다.</li>
+        `;
+      }
+    } else if (recommendedMethod === "polyreg") {
+      if (nameEl) nameEl.textContent = "다항회귀분석 (직선 vs 곡선 경향 비교)";
+      if (descEl) descEl.textContent = "선형 모형과 2차·3차 곡선 모형을 차례로 비교해, 증가 폭이 둔화되거나 특정 지점 이후 반전되는(U자/역U자) 곡선 관계가 통계적으로 유의한지 판정하고 최적의 모형을 추천합니다.";
+      if (assumptionsEl) {
+        assumptionsEl.innerHTML = `
+          <li>최고차항 검정: 추가한 X²(또는 X³) 항의 계수가 유의해야(p &lt; 0.05) 곡선 모형을 쓸 근거가 있습니다.</li>
+          <li>적합도 결여 검정: 같은 X 값에서 반복 측정한 데이터가 있으면 모형이 패턴을 충분히 설명하는지 검정할 수 있습니다.</li>
+          <li>과적합·외삽 주의: 데이터 수가 적은데 차수를 높이거나, 관측 범위 밖을 예측하면 결과가 크게 빗나갈 수 있습니다.</li>
         `;
       }
     } else if (recommendedMethod === "chisq-ind") {
