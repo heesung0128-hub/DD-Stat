@@ -345,10 +345,29 @@ const StatsHelper = {
       });
     });
 
-    // 집단 내 제곱합 (SS Within)
-    const ssWithin = ssTotal - ssBetween;
+    // 집단 내 제곱합 (SS Within) - 뺄셈 대신 직접 계산해 부동소수점 오차로 F가 폭주하는 것을 방지
+    let ssWithin = 0;
+    zGroups.forEach((zg, i) => {
+      zg.forEach(v => {
+        ssWithin += Math.pow(v - zMeans[i], 2);
+      });
+    });
     const dfBetween = k - 1;
     const dfWithin = nTotal - k;
+
+    // 집단마다 데이터가 2개뿐이면 두 값의 편차 절대값이 항상 같아 집단 내 변동이 0이 되므로 검정이 성립하지 않음
+    if (ssWithin <= 1e-12 * Math.max(ssTotal, 1)) {
+      return {
+        passed: true,
+        fValue: null,
+        pValue: null,
+        dfBetween,
+        dfWithin,
+        title: "등분산 검정 불가",
+        reason: "집단별 데이터가 너무 적어(대부분 2개 이하) 르빈의 등분산 검정을 할 수 없습니다. 집단별 표준편차를 직접 비교해 보고, 가능하면 집단마다 3개 이상의 데이터를 모아 주세요.",
+        severity: "warning"
+      };
+    }
 
     const msBetween = ssBetween / dfBetween;
     const msWithin = ssWithin / dfWithin;
@@ -737,6 +756,22 @@ const StatsHelper = {
 
     const fCrit = jStat.centralF.inv(0.95, dfBetween, dfWithin);
 
+    // 스튜던트화 범위 분포로 임계값을 정확히 계산 (표의 df 구간 사이를 큰 df 값으로 반올림하면
+    // 작은 표본에서 임계값이 실제보다 작아져 유의 판정이 남발되므로). 계산 실패 시에만 표 값 사용.
+    const qTukey = (() => {
+      const q = jStat.tukey.inv(0.95, k, dfWithin);
+      return isFinite(q) ? q : getTukeyCriticalValue(k, dfWithin);
+    })();
+    const duncanCache = {};
+    const getDuncanQ = r => {
+      if (duncanCache[r] === undefined) {
+        // Duncan 보호 수준: α_r = 1 - (1 - α)^(r - 1)
+        const q = jStat.tukey.inv(Math.pow(0.95, r - 1), r, dfWithin);
+        duncanCache[r] = isFinite(q) ? q : getDuncanCriticalValue(r, dfWithin);
+      }
+      return duncanCache[r];
+    };
+
     for (let i = 0; i < k; i++) {
       for (let j = i + 1; j < k; j++) {
         const nameA = groupNames[i];
@@ -754,7 +789,7 @@ const StatsHelper = {
         const idxA = sortedGroups.findIndex(g => g.name === nameA);
         const idxB = sortedGroups.findIndex(g => g.name === nameB);
         const r = Math.abs(idxA - idxB) + 1;
-        const qDuncan = getDuncanCriticalValue(r, dfWithin);
+        const qDuncan = getDuncanQ(r);
         const lsr = qDuncan * se;
         const isDuncanSig = absDiff > lsr;
         duncanPH.push({
@@ -778,15 +813,19 @@ const StatsHelper = {
         });
 
         // 3. Tukey-Kramer 검정
-        const qTukey = getTukeyCriticalValue(k, dfWithin);
         const hsd = qTukey * se;
         const isTukeySig = absDiff > hsd;
-        
-        // Bonferroni 보정 p값 활용
-        const tVal = diff / Math.sqrt(msWithin * (1 / nA + 1 / nB));
-        const rawP = 2 * (1 - jStat.studentt.cdf(Math.abs(tVal), dfWithin));
-        const numComparisons = (k * (k - 1)) / 2;
-        const adjustedP = Math.min(1.0, rawP * numComparisons);
+
+        // Tukey 보정 p값: 관측된 스튜던트화 범위 q = |차이| / SE 의 상단 확률
+        const qObs = se > 0 ? absDiff / se : 0;
+        let adjustedP = 1 - jStat.tukey.cdf(qObs, k, dfWithin);
+        if (!isFinite(adjustedP)) {
+          // 계산 실패 시 Bonferroni 보정 p값으로 대체
+          const tVal = diff / Math.sqrt(msWithin * (1 / nA + 1 / nB));
+          const rawP = 2 * (1 - jStat.studentt.cdf(Math.abs(tVal), dfWithin));
+          adjustedP = Math.min(1.0, rawP * (k * (k - 1)) / 2);
+        }
+        adjustedP = Math.min(1, Math.max(0, adjustedP));
 
         tukeyPH.push({
           comparison: `${nameA} vs ${nameB}`,
@@ -1261,8 +1300,9 @@ const StatsHelper = {
     const n = xData.length;
     const k = order + 1; // 계수 개수 (절편 포함)
 
-    if (n < order + 3) {
-      return { error: `${order}차 다항회귀는 최소 ${order + 3}개 이상의 데이터가 필요합니다. (현재 ${n}개)` };
+    // 잔차 자유도(n - 계수 개수)가 최소 1 이상이어야 F·t 검정이 가능 (수학적 최소)
+    if (n < order + 2) {
+      return { error: `${order}차 다항회귀는 최소 ${order + 2}개 이상의 데이터가 필요합니다. (현재 ${n}개)` };
     }
     const distinctX = new Set(xData.map(x => String(x))).size;
     if (distinctX < k) {

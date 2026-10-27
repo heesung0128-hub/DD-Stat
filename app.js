@@ -2731,7 +2731,7 @@ function runOneSampleTTestAnalysis() {
 
   // 1. 가정 점검 (정규성)
   const normCheck = StatsHelper.checkNormality(numericData);
-  renderAssumptionDashboard([normCheck]);
+  renderAssumptionDashboard([normCheck, smallSampleCheck("mean", numericData.length)]);
 
   // 2. 연산
   const result = StatsHelper.oneSampleTTest(numericData, testValue);
@@ -2855,7 +2855,7 @@ function runCIAnalysis() {
 
   // 1. 가정 점검
   const normCheck = StatsHelper.checkNormality(data);
-  renderAssumptionDashboard([normCheck]);
+  renderAssumptionDashboard([normCheck, smallSampleCheck("mean", normCheck.n)]);
 
   // 2. 연산
   const ci = StatsHelper.estimateConfidenceInterval(data, level);
@@ -2963,7 +2963,7 @@ function runIndependentTTestAnalysis() {
   // 커스텀 리포트
   normA.reason = `'${getValLabel(groupVar, gA)}' 집단의 정규성: ` + normA.reason;
   normB.reason = `'${getValLabel(groupVar, gB)}' 집단의 정규성: ` + normB.reason;
-  renderAssumptionDashboard([normA, normB, homos]);
+  renderAssumptionDashboard([normA, normB, homos, smallSampleCheck("group", Math.min(dataA.length, dataB.length))]);
 
   // 2. 검정 연산
   const tResult = StatsHelper.independentTTest(dataA, dataB);
@@ -2979,10 +2979,16 @@ function runIndependentTTestAnalysis() {
   const passed = tResult.homoscedasticity.passed;
   const leveneF = tResult.homoscedasticity.fValue;
   const leveneP = tResult.homoscedasticity.pValue;
+  // 집단별 데이터가 너무 적어 르빈 검정이 불가능한 경우 fValue/pValue는 null
+  const leveneTestable = leveneF !== null && leveneP !== null;
+  const leveneFText = leveneTestable ? leveneF.toFixed(3) : "-";
+  const lenevePText = leveneTestable ? leveneP.toFixed(4) : "-";
 
-  const suggestionText = passed
-    ? `<span style="color:var(--success);font-weight:bold;"><i class="fa-solid fa-circle-check"></i> [등분산성 충족 - 등분산 가정됨 채택]</span> 르빈의 등분산 검정 유의확률 p = ${leveneP.toFixed(4)} (≥ 0.05)로 분산의 차이가 유의하지 않습니다. 아래 테이블에서 <strong>'등분산 가정됨'</strong> 행의 t-검정 결과를 보고하십시오.`
-    : `<span style="color:var(--danger);font-weight:bold;"><i class="fa-solid fa-triangle-exclamation"></i> [등분산성 위배 의심 - 등분산 가정안됨 채택]</span> 르빈의 등분산 검정 유의확률 p = ${leveneP.toFixed(4)} (< 0.05)로 분산의 유의한 차이가 발견되었습니다. 아래 테이블에서 <strong>'등분산 가정되지 않음(Welch t-검정)'</strong> 행의 결과를 보고하십시오.`;
+  const suggestionText = !leveneTestable
+    ? `<span style="color:var(--warning);font-weight:bold;"><i class="fa-solid fa-triangle-exclamation"></i> [등분산 검정 불가]</span> ${tResult.homoscedasticity.reason} 등분산 여부를 알 수 없을 때는 더 보수적인 <strong>'등분산 가정되지 않음(Welch t-검정)'</strong> 행의 결과를 함께 확인하십시오.`
+    : passed
+    ? `<span style="color:var(--success);font-weight:bold;"><i class="fa-solid fa-circle-check"></i> [등분산성 충족 - 등분산 가정됨 채택]</span> 르빈의 등분산 검정 유의확률 p = ${lenevePText} (≥ 0.05)로 분산의 차이가 유의하지 않습니다. 아래 테이블에서 <strong>'등분산 가정됨'</strong> 행의 t-검정 결과를 보고하십시오.`
+    : `<span style="color:var(--danger);font-weight:bold;"><i class="fa-solid fa-triangle-exclamation"></i> [등분산성 위배 의심 - 등분산 가정안됨 채택]</span> 르빈의 등분산 검정 유의확률 p = ${lenevePText} (< 0.05)로 분산의 유의한 차이가 발견되었습니다. 아래 테이블에서 <strong>'등분산 가정되지 않음(Welch t-검정)'</strong> 행의 결과를 보고하십시오.`;
 
   const eqSig = tResult.equalVariance.pValue < 0.05 ? "유의함 (p < 0.05)" : "유의하지 않음 (p ≥ 0.05)";
   const uneqSig = tResult.unequalVariance.pValue < 0.05 ? "유의함 (p < 0.05)" : "유의하지 않음 (p ≥ 0.05)";
@@ -3050,8 +3056,8 @@ function runIndependentTTestAnalysis() {
             <tbody>
               <tr style="${passed ? 'background-color:rgba(56, 158, 13, 0.08); font-weight:600;' : ''}">
                 <td style="border:1px solid var(--border-glass); padding:8px;"><strong>등분산 가정됨</strong></td>
-                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;" rowspan="2"><strong>${leveneF.toFixed(3)}</strong></td>
-                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;" rowspan="2"><strong style="color:${!passed ? 'var(--danger)' : 'inherit'};">${leveneP.toFixed(4)}</strong></td>
+                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;" rowspan="2"><strong>${leveneFText}</strong></td>
+                <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;" rowspan="2"><strong style="color:${!passed ? 'var(--danger)' : 'inherit'};">${lenevePText}</strong></td>
                 <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.equalVariance.tValue.toFixed(3)}</td>
                 <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.equalVariance.df.toFixed(2)}</td>
                 <td style="border:1px solid var(--border-glass); text-align:center; padding:8px; color:${tResult.equalVariance.pValue < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${tResult.equalVariance.pValue.toFixed(4)}</strong><br><span style="font-size:9px;font-weight:normal;">(${eqSig})</span></td>
@@ -3090,7 +3096,7 @@ function runIndependentTTestAnalysis() {
 
   interpretation.innerHTML = `
     <p><strong>'${groupVar}'</strong>에 속한 두 집단(${getValLabel(groupVar, gA)} vs ${getValLabel(groupVar, gB)}) 간에 <strong>'${varName}'</strong>의 평균에 유의미한 차이가 있는지 독립표본 t-검정을 실시하였습니다.</p>
-    <p>르빈의 등분산 검정 결과(F = ${leveneF.toFixed(3)}, p = ${leveneP.toFixed(4)})에 의거하여, 통계적으로 <strong>'${passed ? "등분산 가정됨" : "등분산 가정되지 않음(Welch의 t-검정)"}'</strong> 행의 결과를 인용 채택합니다.</p>
+    <p>르빈의 등분산 검정 결과(F = ${leveneFText}, p = ${lenevePText})에 의거하여, 통계적으로 <strong>'${passed ? "등분산 가정됨" : "등분산 가정되지 않음(Welch의 t-검정)"}'</strong> 행의 결과를 인용 채택합니다.</p>
     <p>분석 결과, 두 집단의 평균값 차이는 <strong>${tResult.diff.toFixed(2)}</strong>이며, 이 차이는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${activeResult.tValue.toFixed(2)}, df = ${activeResult.df.toFixed(2)}, p = ${activeResult.pValue.toFixed(3)}).</p>
     <p>${isSig ? `즉, 우연히 이러한 차이가 관측될 확률이 5% 미만이므로, 두 집단 간에는 실제 평균 점수 차이가 존재한다고 결론 내릴 수 있습니다.` : `즉, 우연한 요인으로 발생할 수 있는 수준의 미미한 차이이므로, 두 집단 간에는 실제 평균적인 차이가 없다고 해석합니다.`}</p>
     <p>추가로 분석된 두 집단 차이의 실질적인 크기(효과크기, Cohen's d)는 <strong>${tResult.cohensD.toFixed(2)}</strong>로, <strong>${effectLabel}</strong>에 해당합니다.</p>
@@ -3152,7 +3158,7 @@ function runPairedTTestAnalysis() {
   const diffs = dataPost.map((v, i) => v - dataPre[i]);
   const normDiff = StatsHelper.checkNormality(diffs);
   normDiff.reason = "사전-사후 차이값의 정규성: " + normDiff.reason;
-  renderAssumptionDashboard([normDiff]);
+  renderAssumptionDashboard([normDiff, smallSampleCheck("paired", diffs.length)]);
 
   // 2. 검정 연산
   const tResult = StatsHelper.pairedTTest(dataPre, dataPost);
@@ -3299,6 +3305,7 @@ function runAnovaAnalysis() {
   const groupsList = grpNames.map(name => groupDataMap[name]);
   const homos = StatsHelper.checkHomoscedasticity(groupsList);
   norms.push(homos);
+  norms.push(smallSampleCheck("group", Math.min(...groupsList.map(g => g.length))));
   renderAssumptionDashboard(norms);
 
   // 2. ANOVA 연산
@@ -3885,7 +3892,7 @@ function runCorrelationAnalysis() {
   const norm2 = StatsHelper.checkNormality(data2);
   norm1.reason = `'${var1}' 정규성: ` + norm1.reason;
   norm2.reason = `'${var2}' 정규성: ` + norm2.reason;
-  renderAssumptionDashboard([norm1, norm2]);
+  renderAssumptionDashboard([norm1, norm2, smallSampleCheck("corr", data1.length)]);
 
   // 2. 연산
   const corr = StatsHelper.correlationAnalysis(data1, data2);
@@ -4172,7 +4179,7 @@ function runRegressionAnalysis() {
   const norm2 = StatsHelper.checkNormality(data2);
   norm1.reason = `독립변수 정규성: ` + norm1.reason;
   norm2.reason = `종속변수 정규성: ` + norm2.reason;
-  renderAssumptionDashboard([norm1, norm2]);
+  renderAssumptionDashboard([norm1, norm2, smallSampleCheck("reg", data1.length)]);
 
   // 2. 연산
   const reg = StatsHelper.linearRegression(data1, data2);
@@ -4470,16 +4477,26 @@ function runPolynomialRegressionAnalysis() {
     }
   });
 
-  // 1. 모형 1(선형) ~ 최고 차수 모형까지 적합
+  // 1. 모형 1(선형) ~ 최고 차수 모형까지 적합 (데이터가 부족한 높은 차수는 비교에서 제외)
   const models = [];
+  const skippedNotes = [];
   for (let order = 1; order <= maxOrder; order++) {
     const model = StatsHelper.polynomialRegression(xData, yData, order);
     if (model.error) {
-      alert(model.error);
-      return;
+      if (order === 1) {
+        alert(model.error);
+        return;
+      }
+      skippedNotes.push(`${order}차 모형은 비교에서 제외했습니다: ${model.error}`);
+      break;
     }
     models.push(model);
   }
+  if (models.length < 2) {
+    alert(`곡선 모형과 비교할 수 없습니다.\n${skippedNotes.join("\n")}\n\n직선 관계만 분석하려면 '8. 단순선형회귀분석'을 사용해 주세요.`);
+    return;
+  }
+  const fittedMaxOrder = models[models.length - 1].order;
   const n = xData.length;
 
   // 2. 위계적 비교 (모형 k-1 → 모형 k) 및 각 모형의 적합도 결여 검정
@@ -4512,13 +4529,25 @@ function runPolynomialRegressionAnalysis() {
   const residNorm = StatsHelper.checkNormality(chosen.residuals);
   residNorm.reason = `선택된 모형(${modelShortNames[chosen.order]})의 잔차 정규성: ` + residNorm.reason;
   checks.push(residNorm);
-  const minRecommendedN = (maxOrder + 1) * 3;
+  const minRecommendedN = (fittedMaxOrder + 1) * 3;
   checks.push({
     passed: n >= minRecommendedN,
     severity: n >= minRecommendedN ? "success" : "warning",
     reason: n >= minRecommendedN
-      ? `표본 크기(n=${n})가 ${maxOrder}차 모형의 계수 개수(${maxOrder + 1}개) 대비 충분합니다 (권장 ${minRecommendedN}개 이상).`
-      : `표본 크기(n=${n})가 ${maxOrder}차 모형의 계수 개수(${maxOrder + 1}개)에 비해 적습니다 (권장 ${minRecommendedN}개 이상). 차수가 높을수록 곡선이 점을 억지로 통과하는 과적합이 생길 수 있습니다.`
+      ? `표본 크기(n=${n})가 ${fittedMaxOrder}차 모형의 계수 개수(${fittedMaxOrder + 1}개) 대비 충분합니다 (권장 ${minRecommendedN}개 이상).`
+      : `표본 크기(n=${n})가 ${fittedMaxOrder}차 모형의 계수 개수(${fittedMaxOrder + 1}개)에 비해 적습니다 (권장 ${minRecommendedN}개 이상). 차수가 높을수록 곡선이 점을 억지로 통과하는 과적합이 생길 수 있습니다.`
+  });
+  const topModel = models[models.length - 1];
+  if (topModel.dfRes <= 2) {
+    checks.push({
+      passed: true,
+      severity: "warning",
+      title: "표본 크기 주의",
+      reason: `${fittedMaxOrder}차 모형의 잔차 자유도가 ${topModel.dfRes}로 매우 작습니다. 계산은 가능하지만 최고차항 검정의 임계값이 커서(자유도 1이면 t ≈ 12.7) 실제 곡선 경향이 있어도 '유의하지 않음'으로 나오기 쉽습니다.`
+    });
+  }
+  skippedNotes.forEach(note => {
+    checks.push({ passed: true, severity: "warning", title: "비교 범위 축소", reason: note });
   });
   if (chosenLof.available) {
     checks.push({
@@ -4757,7 +4786,7 @@ function runPolynomialRegressionAnalysis() {
   if (chosen.order === 1) {
     const cmp2 = comparisons[1];
     decisionHtml = `<p><strong>[모형 선택 결과] 단순 선형 회귀 모형 채택 권장</strong><br>
-      2차항(X²) 추가에 따른 설명력 증가가 통계적으로 유의하지 않습니다 (ΔR² = ${cmp2.deltaR2.toFixed(4)}, F 변화량 = ${cmp2.fChange.toFixed(2)}, p = ${cmp2.pValue.toFixed(3)})${maxOrder >= 3 ? `. 3차항(X³)을 추가한 경우도 유의하지 않았습니다 (p = ${comparisons[2].pValue.toFixed(3)})` : ""}.
+      2차항(X²) 추가에 따른 설명력 증가가 통계적으로 유의하지 않습니다 (ΔR² = ${cmp2.deltaR2.toFixed(4)}, F 변화량 = ${cmp2.fChange.toFixed(2)}, p = ${cmp2.pValue.toFixed(3)})${fittedMaxOrder >= 3 ? `. 3차항(X³)을 추가한 경우도 유의하지 않았습니다 (p = ${comparisons[2].pValue.toFixed(3)})` : ""}.
       복잡한 곡선 모형 대신 <strong>단순 선형 회귀 모형</strong>을 사용하는 것이 적절합니다.</p>`;
   } else {
     const cmp = comparisons[chosenIdx];
@@ -4804,7 +4833,7 @@ function runPolynomialRegressionAnalysis() {
     : "";
 
   document.getElementById("infer-korean-interpretation").innerHTML = `
-    <p>독립변수 <strong>'${var1}'</strong>와(과) 종속변수 <strong>'${var2}'</strong> 사이의 관계가 직선인지 곡선인지 알아보기 위해 선형 모형과 ${maxOrder === 3 ? "2차·3차" : "2차"} 다항 회귀 모형을 차례로 적합하고 비교했습니다 (n = ${n}).</p>
+    <p>독립변수 <strong>'${var1}'</strong>와(과) 종속변수 <strong>'${var2}'</strong> 사이의 관계가 직선인지 곡선인지 알아보기 위해 선형 모형과 ${fittedMaxOrder === 3 ? "2차·3차" : "2차"} 다항 회귀 모형을 차례로 적합하고 비교했습니다 (n = ${n}).${skippedNotes.length ? ` <span style="color:var(--text-muted);">(${skippedNotes.join(" ")})</span>` : ""}</p>
     ${decisionHtml}
     ${shapeHtml}
     <p>채택된 모형의 설명력(R²)은 <strong>${chosen.rSquared.toFixed(3)}</strong>로, '${var2}' 전체 변동의 약 <strong>${(chosen.rSquared * 100).toFixed(1)}%</strong>를 설명합니다.${chosenIdx > 0 ? ` (선형 모형 R² = ${models[0].rSquared.toFixed(3)})` : ""}</p>
@@ -4873,6 +4902,7 @@ function runMultipleRegressionAnalysis() {
     norm.reason = `독립변수 '${x}' 정규성: ` + norm.reason;
     assumptionChecks.push(norm);
   });
+  assumptionChecks.push(smallSampleCheck("multireg", n, p));
   renderAssumptionDashboard(assumptionChecks);
 
   // 2. 연산
@@ -5125,12 +5155,36 @@ function runMultipleRegressionAnalysis() {
   alertTxt.textContent = "CRITICAL WARNING (인과 비약 방지): 다중선형회귀분석은 복수 변수의 통계적 연합을 보여줍니다. 그러나 변수들 사이에 다중공선성(변수 간 선형 종속)이 크거나, 표집 편향이 존재한다면 왜곡된 설명력을 가집니다. 이를 인과관계로 비약해석하는 것은 철저히 지양해 주십시오.";
 }
 
+// 작은 표본 경고 항목 (계산은 가능하지만 결과 해석에 주의가 필요한 경우). 해당 없으면 null
+// kind: "mean"(일표본·신뢰구간), "group"(집단 비교, n은 가장 작은 집단), "paired", "corr", "reg", "multireg"(p: 독립변수 개수)
+function smallSampleCheck(kind, n, p = 1) {
+  if (!n) return null;
+  const notReliable = "'유의하지 않음'이 나와도 '차이(관계)가 없다'는 뜻이 아니라 '판단할 근거가 부족하다'는 뜻으로 해석하세요.";
+  let reason = null;
+
+  if (kind === "mean" && n < 10) {
+    reason = `표본 크기(n=${n})가 10 미만입니다. 계산은 가능하지만 t 임계값이 커서(n=2이면 12.71) 신뢰구간이 매우 넓고, 실제 차이가 있어도 놓치기 쉽습니다(검정력 부족). ${notReliable}`;
+  } else if (kind === "group" && n < 10) {
+    reason = `가장 작은 집단의 표본 크기(n=${n})가 10 미만입니다. 계산은 가능하지만 집단 평균이 몇 개의 값에 크게 흔들리고, 실제 차이가 있어도 놓치기 쉽습니다(검정력 부족). ${notReliable}`;
+  } else if (kind === "paired" && n < 10) {
+    reason = `사전-사후 데이터 쌍(${n}쌍)이 10쌍 미만입니다. 계산은 가능하지만 검정력이 낮습니다. ${notReliable}${n < 3 ? " 또한 사전-사후 상관계수는 3쌍 이상부터 계산됩니다." : ""}`;
+  } else if (kind === "corr" && n < 10) {
+    reason = `데이터 쌍(${n}쌍)이 10쌍 미만입니다. 표본이 적으면 우연히 큰 상관계수(r)가 나올 수 있어 r 값이 매우 불안정합니다.${n < 4 ? " r의 95% 신뢰구간은 4쌍 이상부터 계산됩니다." : ""}`;
+  } else if (kind === "reg" && n < 10) {
+    reason = `데이터 쌍(${n}쌍)이 10쌍 미만입니다. 잔차 자유도(${n - 2})가 작아 기울기 추정이 불안정하고, 점 1~2개가 회귀선을 크게 좌우할 수 있습니다. ${notReliable}`;
+  } else if (kind === "multireg" && n < 10 * p) {
+    reason = `독립변수 1개당 약 10개 이상의 데이터가 권장되지만 현재 ${(n / p).toFixed(1)}개입니다 (n=${n}, 독립변수 ${p}개). 회귀계수가 불안정하고 설명력(R²)이 부풀려지는 과적합이 생길 수 있으니 조정된 R²를 함께 확인하세요.`;
+  }
+
+  return reason ? { passed: true, severity: "warning", title: "표본 크기 주의", reason } : null;
+}
+
 // 가정 점검 대시보드 렌더러
 function renderAssumptionDashboard(checks) {
   const container = document.getElementById("assumption-list-container");
   container.innerHTML = "";
-  
-  checks.forEach(chk => {
+
+  checks.filter(Boolean).forEach(chk => {
     const item = document.createElement("div");
     let statusClass = "success";
     let iconClass = "fa-circle-check";
@@ -5147,7 +5201,7 @@ function renderAssumptionDashboard(checks) {
     item.innerHTML = `
       <i class="fa-solid ${iconClass} assumption-icon"></i>
       <div class="assumption-content">
-        <h4>${chk.passed ? "충족됨" : "주의 / 조정 필요"}</h4>
+        <h4>${chk.title || (chk.passed ? "충족됨" : "주의 / 조정 필요")}</h4>
         <p>${chk.reason}</p>
       </div>
     `;
