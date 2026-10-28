@@ -429,6 +429,8 @@ function downloadAnalysisReport() {
         console.error("Canvas export failed: ", e);
       }
     }
+    // 화면에서 숨겨진 카드(예: ANOVA 전용 사후검정 카드)는 보고서에서 제외
+    clone.querySelectorAll(".hidden").forEach(el => el.remove());
     inferHtml = clone.innerHTML;
   }
 
@@ -4086,6 +4088,16 @@ function runCorrelationAnalysis() {
 }
 
 // 8) 단순선형회귀분석 실행
+// 통계량 표시: Y 값이 작아도 제곱합 등이 0.000으로 뭉개지지 않도록 작은 값은 유효숫자 4자리로 표시
+function fmtStat(v, decimals = 3) {
+  if (v === null || v === undefined || !isFinite(v)) return "-";
+  if (v === 0) return (0).toFixed(decimals);
+  const abs = Math.abs(v);
+  if (abs >= 0.1) return v.toFixed(decimals);
+  if (abs >= 1e-4) return v.toPrecision(4);
+  return v.toExponential(3);
+}
+
 // 분산분석표의 잔차 행 아래에 들어갈 적합도 결여 / 순수 오차 행 (6열 표 기준)
 function buildLackOfFitRowsHtml(lof) {
   const cellStyle = "border:1px solid var(--border-glass); text-align:center; padding:8px;";
@@ -4104,17 +4116,17 @@ function buildLackOfFitRowsHtml(lof) {
   return `
             <tr>
               <td style="${labelStyle}">├ 적합도 결여 (Lack of Fit)</td>
-              <td style="${cellStyle}">${lof.ssLOF.toFixed(3)}</td>
+              <td style="${cellStyle}">${fmtStat(lof.ssLOF)}</td>
               <td style="${cellStyle}">${lof.dfLOF}</td>
-              <td style="${cellStyle}">${lof.msLOF.toFixed(3)}</td>
+              <td style="${cellStyle}">${fmtStat(lof.msLOF)}</td>
               <td style="${cellStyle}"><strong>${lof.fValue.toFixed(3)}</strong></td>
               <td style="${cellStyle} color:${lof.pValue < 0.05 ? 'var(--danger)' : 'inherit'};"><strong>${lof.pValue.toFixed(4)}</strong><br><span style="font-size:9px;font-weight:normal;">(${sigLOF})</span></td>
             </tr>
             <tr>
               <td style="${labelStyle}">└ 순수 오차 (Pure Error)</td>
-              <td style="${cellStyle}">${lof.ssPE.toFixed(3)}</td>
+              <td style="${cellStyle}">${fmtStat(lof.ssPE)}</td>
               <td style="${cellStyle}">${lof.dfPE}</td>
-              <td style="${cellStyle}">${lof.msPE.toFixed(3)}</td>
+              <td style="${cellStyle}">${fmtStat(lof.msPE)}</td>
               <td style="${cellStyle}"></td>
               <td style="${cellStyle}"></td>
             </tr>`;
@@ -4281,22 +4293,22 @@ function runRegressionAnalysis() {
           <tbody>
             <tr>
               <td style="border:1px solid var(--border-glass); padding:8px;"><strong>회귀 (Regression)</strong></td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.ssReg.toFixed(3)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${fmtStat(reg.ssReg)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.dfReg}</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${msReg.toFixed(3)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${fmtStat(msReg)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;" rowspan="2" style="vertical-align:middle;"><strong>${reg.fValue.toFixed(3)}</strong></td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;" rowspan="2" style="vertical-align:middle; color:${reg.pValueF < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${reg.pValueF.toFixed(4)}</strong><br><span style="font-size:9px;font-weight:normal;">(${sigF})</span></td>
             </tr>
             <tr>
               <td style="border:1px solid var(--border-glass); padding:8px;"><strong>잔차 (Residual)</strong></td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.ssRes.toFixed(3)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${fmtStat(reg.ssRes)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.dfRes}</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${msRes.toFixed(3)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${fmtStat(msRes)}</td>
             </tr>
             ${buildLackOfFitRowsHtml(lof)}
             <tr class="highlight-row">
               <td style="border:1px solid var(--border-glass); padding:8px;"><strong>합계 (Total)</strong></td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.ssTot.toFixed(3)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${fmtStat(reg.ssTot)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${dfTot}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;"></td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;"></td>
@@ -4438,7 +4450,7 @@ function runRegressionAnalysis() {
   interpretation.innerHTML = `
     <p>원인(독립변수) <strong>'${var1}'</strong>이(가) 결과(종속변수) <strong>'${var2}'</strong>을(를) 통계적으로 유의미하게 예측하는지 단순선형회귀분석을 적용했습니다.</p>
     <p>분석 결과 도출된 회귀모형은 통계적으로 <strong>${isSig ? "유의미하게 타당합니다" : "유의미한 타당성을 얻지 못했습니다"}</strong> (F = ${reg.fValue.toFixed(2)}, p = ${reg.pValueF.toFixed(3)}).</p>
-    <p>이 모형의 설명력(결정계수 R²)은 <strong>${reg.rSquared.toFixed(3)}</strong>이며, 이는 독립변수 '${var1}'이 종속변수 '${var2}' 전체 변동의 약 <strong>${(reg.rSquared * 100).toFixed(1)}%</strong>를 설명(예측)해내고 있음을 의미합니다.</p>
+    <p>이 모형의 설명력(결정계수 R²)은 <strong>${reg.rSquared.toFixed(4)}</strong>이며, 이는 독립변수 '${var1}'이 종속변수 '${var2}' 전체 변동의 약 <strong>${(reg.rSquared * 100).toFixed(2)}%</strong>를 설명(예측)해내고 있음을 의미합니다.</p>
     <p>회귀 기울기 값은 <strong>${reg.slope.toFixed(3)}</strong>로 나타나, '${var1}'가 1단위 증가할 때마다 '${var2}'가 약 <strong>${reg.slope.toFixed(2)}</strong>만큼 ${reg.slope > 0 ? '증가' : '감소'}하는 선형 관계가 나타날 것으로 추정됩니다.</p>
     ${buildLackOfFitInterpretationHtml(lof, "단순 직선 모형", true)}
   `;
@@ -4572,13 +4584,24 @@ function runPolynomialRegressionAnalysis() {
               <td style="${labelStyle}">${isChosen ? '⭐ ' : ''}<strong>${modelTitles[m.order]}</strong></td>
               <td style="${cellStyle}">${m.rSquared.toFixed(4)}</td>
               <td style="${cellStyle}">${m.adjustedRSquared.toFixed(4)}</td>
+              <td style="${cellStyle}">${fmtStat(m.ssRes, 4)}<br><span style="font-size:9px;font-weight:normal;">(df = ${m.dfRes})</span></td>
               <td style="${cellStyle}">${cmp ? cmp.deltaR2.toFixed(4) : '-'}</td>
-              <td style="${cellStyle}">${cmp ? cmp.fChange.toFixed(3) : '-'}</td>
+              <td style="${cellStyle}">${cmp ? `<strong>${cmp.fChange.toFixed(3)}</strong><br><span style="font-size:9px;font-weight:normal;">F(${cmp.dfChange}, ${cmp.dfRes})</span>` : '-'}</td>
               <td style="${cellStyle} color:${cmp && cmp.pValue < 0.05 ? 'var(--primary)' : 'inherit'};">${cmp ? `<strong>${fmtP(cmp.pValue)}</strong>` : '-'}</td>
               <td style="${cellStyle}">${i === bestAicIdx ? `<strong>${m.aic.toFixed(2)}</strong>` : m.aic.toFixed(2)} / ${i === bestBicIdx ? `<strong>${m.bic.toFixed(2)}</strong>` : m.bic.toFixed(2)}</td>
               <td style="${cellStyle} color:${lof.available && lof.pValue < 0.05 ? 'var(--danger)' : 'inherit'};">${lof.available ? fmtP(lof.pValue) : '-'}</td>
             </tr>`;
   });
+
+  // 증분 F-검정 계산 과정: F = [(SSE_축소 − SSE_확장) / Δdf] ÷ [SSE_확장 / df_확장]
+  const incrementalFHtml = comparisons.map((cmp, i) => {
+    if (!cmp) return "";
+    const reduced = models[i - 1];
+    const full = models[i];
+    return `· 증분 F-검정 (모형 ${reduced.order} → 모형 ${full.order}): F = [(SSE<sub>${reduced.order}</sub> − SSE<sub>${full.order}</sub>) ÷ ${cmp.dfChange}] ÷ [SSE<sub>${full.order}</sub> ÷ ${full.dfRes}]
+      = [(${fmtStat(reduced.ssRes, 4)} − ${fmtStat(full.ssRes, 4)}) ÷ ${cmp.dfChange}] ÷ [${fmtStat(full.ssRes, 4)} ÷ ${full.dfRes}]
+      = <strong>F(${cmp.dfChange}, ${cmp.dfRes}) = ${cmp.fChange.toFixed(3)}</strong>, p = ${fmtP(cmp.pValue)}<br>`;
+  }).join("");
 
   let compareHtml = `
     <tr><th colspan="4">1. 모형 비교 요약표 (Model Summary Comparison)</th></tr>
@@ -4590,8 +4613,9 @@ function runPolynomialRegressionAnalysis() {
               <th style="${labelStyle}">모형</th>
               <th style="${cellStyle}">R²</th>
               <th style="${cellStyle}">조정된 R²</th>
+              <th style="${cellStyle}">잔차 제곱합 (SSE)</th>
               <th style="${cellStyle}">R² 변화량 (ΔR²)</th>
-              <th style="${cellStyle}">F 변화량</th>
+              <th style="${cellStyle}">F 변화량<br>(증분 F-검정)</th>
               <th style="${cellStyle}">F 변화량 유의확률</th>
               <th style="${cellStyle}">AIC / BIC</th>
               <th style="${cellStyle}">적합도 결여 p</th>
@@ -4601,7 +4625,8 @@ function runPolynomialRegressionAnalysis() {
           </tbody>
         </table>
         <p style="font-size:10px; color:var(--text-muted); margin:6px 0 0; line-height:1.5;">
-          · ΔR²와 F 변화량은 바로 앞 모형에 한 차수 높은 항을 추가했을 때의 설명력 증가와 그 유의성입니다 (위계적 회귀분석).<br>
+          · ΔR²와 F 변화량은 바로 앞 모형에 한 차수 높은 항을 추가했을 때의 설명력 증가와 그 유의성입니다 (위계적 회귀분석의 증분 F-검정).<br>
+          ${incrementalFHtml}
           · AIC/BIC는 모형의 복잡도(계수 개수) 대비 설명력을 평가하며 <strong>값이 작을수록 우수</strong>합니다. 프로그램마다 상수항 정의가 달라 절댓값은 다를 수 있으니 모형끼리의 비교에만 사용하세요.<br>
           · ⭐ 표시는 아래 자동 모형 선택 기준으로 채택된 모형입니다.
         </p>
@@ -4628,24 +4653,24 @@ function runPolynomialRegressionAnalysis() {
           <tbody>
             <tr>
               <td style="${labelStyle}"><strong>회귀 (Regression)</strong></td>
-              <td style="${cellStyle}">${chosen.ssReg.toFixed(3)}</td>
+              <td style="${cellStyle}">${fmtStat(chosen.ssReg)}</td>
               <td style="${cellStyle}">${chosen.dfReg}</td>
-              <td style="${cellStyle}">${chosen.msReg.toFixed(3)}</td>
+              <td style="${cellStyle}">${fmtStat(chosen.msReg)}</td>
               <td style="${cellStyle}"><strong>${chosen.fValue.toFixed(3)}</strong></td>
               <td style="${cellStyle} color:${chosen.pValueF < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${fmtP(chosen.pValueF)}</strong></td>
             </tr>
             <tr>
               <td style="${labelStyle}"><strong>잔차 (Residual)</strong></td>
-              <td style="${cellStyle}">${chosen.ssRes.toFixed(3)}</td>
+              <td style="${cellStyle}">${fmtStat(chosen.ssRes)}</td>
               <td style="${cellStyle}">${chosen.dfRes}</td>
-              <td style="${cellStyle}">${chosen.msRes.toFixed(3)}</td>
+              <td style="${cellStyle}">${fmtStat(chosen.msRes)}</td>
               <td style="${cellStyle}"></td>
               <td style="${cellStyle}"></td>
             </tr>
             ${buildLackOfFitRowsHtml(chosenLof)}
             <tr class="highlight-row">
               <td style="${labelStyle}"><strong>합계 (Total)</strong></td>
-              <td style="${cellStyle}">${chosen.ssTot.toFixed(3)}</td>
+              <td style="${cellStyle}">${fmtStat(chosen.ssTot)}</td>
               <td style="${cellStyle}">${chosen.dfTot}</td>
               <td style="${cellStyle}"></td>
               <td style="${cellStyle}"></td>
@@ -4786,7 +4811,7 @@ function runPolynomialRegressionAnalysis() {
   if (chosen.order === 1) {
     const cmp2 = comparisons[1];
     decisionHtml = `<p><strong>[모형 선택 결과] 단순 선형 회귀 모형 채택 권장</strong><br>
-      2차항(X²) 추가에 따른 설명력 증가가 통계적으로 유의하지 않습니다 (ΔR² = ${cmp2.deltaR2.toFixed(4)}, F 변화량 = ${cmp2.fChange.toFixed(2)}, p = ${cmp2.pValue.toFixed(3)})${fittedMaxOrder >= 3 ? `. 3차항(X³)을 추가한 경우도 유의하지 않았습니다 (p = ${comparisons[2].pValue.toFixed(3)})` : ""}.
+      2차항(X²) 추가에 따른 설명력 증가가 통계적으로 유의하지 않습니다 (ΔR² = ${cmp2.deltaR2.toFixed(4)}, 증분 F(${cmp2.dfChange}, ${cmp2.dfRes}) = ${cmp2.fChange.toFixed(2)}, p = ${cmp2.pValue.toFixed(3)})${fittedMaxOrder >= 3 ? `. 3차항(X³)을 추가한 경우도 유의하지 않았습니다 (p = ${comparisons[2].pValue.toFixed(3)})` : ""}.
       복잡한 곡선 모형 대신 <strong>단순 선형 회귀 모형</strong>을 사용하는 것이 적절합니다.</p>`;
   } else {
     const cmp = comparisons[chosenIdx];
@@ -4794,7 +4819,7 @@ function runPolynomialRegressionAnalysis() {
       ? ` 한편 3차항(X³)을 추가한 것은 유의하지 않아 (p = ${comparisons[chosenIdx + 1].pValue.toFixed(3)}) 더 복잡한 모형은 필요하지 않습니다.`
       : "";
     decisionHtml = `<p><strong>[모형 선택 결과] ${modelShortNames[chosen.order]} 채택 권장</strong><br>
-      ${xPowLabel[chosen.order]}항의 회귀계수가 유의하고 (${chosen.coefficients[chosen.order].pValue < 0.0001 ? "p < .0001" : `p = ${chosen.coefficients[chosen.order].pValue.toFixed(4)}`}), ${xPowLabel[chosen.order]}항 추가에 따른 설명력 증가도 유의합니다 (ΔR² = ${cmp.deltaR2.toFixed(4)}, F 변화량 = ${cmp.fChange.toFixed(2)}).
+      ${xPowLabel[chosen.order]}항의 회귀계수가 유의하고 (${chosen.coefficients[chosen.order].pValue < 0.0001 ? "p < .0001" : `p = ${chosen.coefficients[chosen.order].pValue.toFixed(4)}`}), ${xPowLabel[chosen.order]}항 추가에 따른 설명력 증가도 유의합니다 (ΔR² = ${cmp.deltaR2.toFixed(4)}, 증분 F(${cmp.dfChange}, ${cmp.dfRes}) = ${cmp.fChange.toFixed(2)}).
       ${modelShortNames[chosen.order]}이 데이터의 곡선 패턴(변화율 둔화/반전)을 선형 모형보다 통계적으로 유의미하게 더 잘 설명합니다.${higherNote}</p>`;
   }
 
@@ -4836,7 +4861,7 @@ function runPolynomialRegressionAnalysis() {
     <p>독립변수 <strong>'${var1}'</strong>와(과) 종속변수 <strong>'${var2}'</strong> 사이의 관계가 직선인지 곡선인지 알아보기 위해 선형 모형과 ${fittedMaxOrder === 3 ? "2차·3차" : "2차"} 다항 회귀 모형을 차례로 적합하고 비교했습니다 (n = ${n}).${skippedNotes.length ? ` <span style="color:var(--text-muted);">(${skippedNotes.join(" ")})</span>` : ""}</p>
     ${decisionHtml}
     ${shapeHtml}
-    <p>채택된 모형의 설명력(R²)은 <strong>${chosen.rSquared.toFixed(3)}</strong>로, '${var2}' 전체 변동의 약 <strong>${(chosen.rSquared * 100).toFixed(1)}%</strong>를 설명합니다.${chosenIdx > 0 ? ` (선형 모형 R² = ${models[0].rSquared.toFixed(3)})` : ""}</p>
+    <p>채택된 모형의 설명력(R²)은 <strong>${chosen.rSquared.toFixed(4)}</strong>로, '${var2}' 전체 변동의 약 <strong>${(chosen.rSquared * 100).toFixed(2)}%</strong>를 설명합니다.${chosenIdx > 0 ? ` (선형 모형 R² = ${models[0].rSquared.toFixed(4)})` : ""}</p>
     ${icHtml}
     ${buildLackOfFitInterpretationHtml(chosenLof, modelShortNames[chosen.order], false)}
     ${overfitHtml}
@@ -4963,21 +4988,21 @@ function runMultipleRegressionAnalysis() {
           <tbody>
             <tr>
               <td style="border:1px solid var(--border-glass); padding:8px;"><strong>회귀 (Regression)</strong></td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.ssReg.toFixed(3)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${fmtStat(reg.ssReg)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.dfReg}</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.msReg.toFixed(3)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${fmtStat(reg.msReg)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center;" rowspan="2" style="vertical-align:middle;"><strong>${reg.fValue.toFixed(3)}</strong></td>
               <td style="border:1px solid var(--border-glass); text-align:center;" rowspan="2" style="vertical-align:middle; color:${reg.pValueF < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${reg.pValueF.toFixed(4)}</strong><br><span style="font-size:9px;font-weight:normal;">(${sigF})</span></td>
             </tr>
             <tr>
               <td style="border:1px solid var(--border-glass); padding:8px;"><strong>잔차 (Residual)</strong></td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.ssRes.toFixed(3)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${fmtStat(reg.ssRes)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.dfRes}</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.msRes.toFixed(3)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${fmtStat(reg.msRes)}</td>
             </tr>
             <tr class="highlight-row">
               <td style="border:1px solid var(--border-glass); padding:8px;"><strong>합계 (Total)</strong></td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.ssTot.toFixed(3)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${fmtStat(reg.ssTot)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${reg.dfTot}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;"></td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;"></td>
@@ -5138,7 +5163,7 @@ function runMultipleRegressionAnalysis() {
   interpretation.innerHTML = `
     <p>독립변수군(${varXList.map(x => `'${x}'`).join(", ")})이 종속변수 <strong>'${varY}'</strong>에 유의미한 예측 효과를 미치는지 다중선형회귀분석을 구동하였습니다.</p>
     <p>분석결과, 회귀 모형의 분산분석 유의성 검정 F값은 <strong>${reg.fValue.toFixed(3)}</strong>이며, 모델 유의확률 p값은 <strong>${reg.pValueF.toFixed(4)}</strong>로 나타나 통계적으로 <strong>${isModelSig ? "유의미하게 타당합니다" : "유의미하지 않습니다"}</strong>.</p>
-    <p>모형의 전체 결정계수(R-Square)는 <strong>${reg.rSquared.toFixed(3)}</strong>로, 이 회귀식의 원인 변수들이 결과 요인인 '${varY}' 총변동의 약 <strong>${(reg.rSquared*100).toFixed(1)}%</strong>를 유의하게 설명하고 있습니다.</p>
+    <p>모형의 전체 결정계수(R-Square)는 <strong>${reg.rSquared.toFixed(4)}</strong>로, 이 회귀식의 원인 변수들이 결과 요인인 '${varY}' 총변동의 약 <strong>${(reg.rSquared*100).toFixed(1)}%</strong>를 유의하게 설명하고 있습니다.</p>
     ${isModelSig && sigVariables.length > 0 
       ? `<p>회귀계수 유의성을 개별 검정한 결과, 독립변수들 중 <strong>${sigVarNames.join(", ")}</strong> 요인(들)이 5% 유의수준 하에서 통계적으로 유의한 예측 기여를 하는 것으로 실증되었습니다.</p>`
       : `<p>개별 독립변수들의 회귀계수(B) 중 5% 유의수준에서 유의미한 독자적 설명력을 가지는 요인은 없는 것으로 나타났습니다.</p>`
