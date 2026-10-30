@@ -1423,11 +1423,11 @@ function initPreprocessTools() {
       const outlierReport = [];
       AppState.headers.forEach(h => {
         if (AppState.colTypes[h] === "continuous") {
-          const desc = StatsHelper.calculateDescriptive(AppState.data.map(r => r[h]));
+          const desc = StatsHelper.calculateDescriptive(AppState.data.map(r => r[h]).filter(v => !isMissingValue(h, v)));
           if (desc && desc.outliers.length > 0) {
             // 테이블 행 마킹 및 모달 기록
             AppState.data.forEach((row, idx) => {
-              const v = parseFloat(row[h]);
+              const v = isMissingValue(h, row[h]) ? NaN : parseFloat(row[h]);
               if (!isNaN(v) && (v < desc.lowerBound || v > desc.upperBound)) {
                 const tr = document.getElementById(`data-tr-${idx}`);
                 if (tr) tr.style.backgroundColor = "var(--danger-light)";
@@ -1923,18 +1923,28 @@ function drawDescriptiveChart(var1, var2, chartType) {
     c.lineTo(cvs.width - padding, h - 40);
     c.stroke();
 
-    // 눈금 눈금
-    const ticks = [stats.min, stats.q1, stats.median, stats.q3, stats.max];
+    // 수염 끝: 이상치가 아닌 값(Q1 - 1.5×IQR 이상, Q3 + 1.5×IQR 이하) 중 가장 작은 값과 가장 큰 값
+    const inliers = data1.map(v => parseFloat(v)).filter(v => !isNaN(v) && v >= stats.lowerBound && v <= stats.upperBound);
+    const whiskerLow = inliers.length ? Math.min(...inliers) : stats.q1;
+    const whiskerHigh = inliers.length ? Math.max(...inliers) : stats.q3;
+
+    // 눈금: 수염 끝, 사분위수, 중앙값, 이상치 (가까운 라벨은 한 줄 아래로 내려 겹침 방지)
+    const ticks = [...new Set([whiskerLow, stats.q1, stats.median, stats.q3, whiskerHigh, ...stats.outliers])].sort((a, b) => a - b);
+    let lastLabelX = -Infinity;
+    let lastRow = 0;
     ticks.forEach(t => {
       const x = scale(t);
       c.beginPath();
       c.moveTo(x, h - 45);
       c.lineTo(x, h - 35);
       c.stroke();
+      const row = x - lastLabelX < 30 ? 1 - lastRow : 0;
       c.fillStyle = textColor;
       c.font = "10px sans-serif";
       c.textAlign = "center";
-      c.fillText(t.toFixed(1), x, h - 22);
+      c.fillText(Number(t.toFixed(2)).toString(), x, h - 22 + row * 12);
+      lastLabelX = x;
+      lastRow = row;
     });
 
     const boxY = 40;
@@ -1942,10 +1952,12 @@ function drawDescriptiveChart(var1, var2, chartType) {
     const q1X = scale(stats.q1);
     const q3X = scale(stats.q3);
     const medX = scale(stats.median);
-    const minX = scale(stats.min);
-    const maxX = scale(stats.max);
+    const minX = scale(whiskerLow);
+    const maxX = scale(whiskerHigh);
 
     // 수염(Whisker) 그리기
+    c.strokeStyle = isDark ? "#c8cdd4" : "#4a5568";
+    c.lineWidth = 1.5;
     c.beginPath();
     c.moveTo(minX, boxY + boxH/2);
     c.lineTo(q1X, boxY + boxH/2);
@@ -1958,25 +1970,25 @@ function drawDescriptiveChart(var1, var2, chartType) {
     c.lineTo(maxX, boxY + boxH - 15);
     c.stroke();
 
-    // 상자 그리기
+    // 상자 그리기 (캔버스는 CSS 변수를 해석하지 못하므로 색상값을 직접 지정)
     c.fillStyle = isDark ? "rgba(114, 46, 209, 0.4)" : "rgba(114, 46, 209, 0.15)";
     c.fillRect(q1X, boxY, q3X - q1X, boxH);
-    c.strokeStyle = "var(--primary)";
+    c.strokeStyle = "rgba(114, 46, 209, 1)";
     c.lineWidth = 2;
     c.strokeRect(q1X, boxY, q3X - q1X, boxH);
 
     // 중앙값 선 그리기
-    c.strokeStyle = "var(--danger)";
+    c.strokeStyle = "#e53e3e";
     c.lineWidth = 3;
     c.beginPath();
     c.moveTo(medX, boxY);
     c.lineTo(medX, boxY + boxH);
     c.stroke();
 
-    // 이상치 점 그리기
+    // 이상치 점 그리기 (수염 밖에 따로 표시)
     stats.outliers.forEach(outVal => {
       const outX = scale(outVal);
-      c.fillStyle = "var(--danger)";
+      c.fillStyle = "#e53e3e";
       c.beginPath();
       c.arc(outX, boxY + boxH/2, 5, 0, Math.PI * 2);
       c.fill();
@@ -2206,9 +2218,10 @@ function drawDescriptiveChart(var1, var2, chartType) {
       alert("산점도를 그리려면 두 번째 변수(교차비교 변수)도 수치형(연속형)이어야 합니다.");
       return;
     }
-    const points = AppState.data.map(row => ({
-      x: parseFloat(row[var1]),
-      y: parseFloat(row[var2])
+    // 결측값 규칙이 적용된 data1/data2 사용
+    const points = data1.map((v, i) => ({
+      x: parseFloat(v),
+      y: parseFloat(data2[i])
     })).filter(pt => !isNaN(pt.x) && !isNaN(pt.y));
 
     AppState.chartInstance = new Chart(ctx, {
@@ -2243,26 +2256,65 @@ function drawDescriptiveChart(var1, var2, chartType) {
     stemLeaf.classList.remove("hidden");
 
     // 줄기-잎 알고리즘
-    // 연속형 수치를 소수점 첫째자리까지 버림하고, 십의자리(줄기)와 일의자리(잎)로 구분
+    // 잎 단위를 데이터 범위에 맞춰 정함: 잎 단위 = 10^(범위의 자릿수 - 1)
+    // (예: 45~95점 → 잎 단위 1(일의 자리), 4.0~9.0시간 → 잎 단위 0.1, 0.12~2.75 → 잎 단위 0.1)
+    // 각 값을 잎 단위로 반올림한 뒤, 마지막 한 자리를 잎, 나머지를 줄기로 나눔
     const numericVals = data1.map(v => parseFloat(v)).filter(v => !isNaN(v)).sort((a,b)=>a-b);
+    if (numericVals.length === 0) return;
+    const slRange = numericVals[numericVals.length - 1] - numericVals[0];
+    const leafExp = slRange > 0 ? Math.floor(Math.log10(slRange)) - 1 : Math.floor(Math.log10(Math.abs(numericVals[0]) || 1)) - 1;
+    const leafUnit = Math.pow(10, leafExp);
+    const unitDecimals = Math.max(0, -leafExp);
+
+    // 줄기 키: 음수는 "-0", "-1" 처럼 따로 구분 (-0.3은 줄기 -0, 잎 3)
+    const toStemLeaf = v => {
+      const scaled = Math.round(v / leafUnit);
+      const negative = scaled < 0;
+      const abs = Math.abs(scaled);
+      return { negative, stem: Math.floor(abs / 10), leaf: abs % 10 };
+    };
+    const stemKey = (negative, stem) => `${negative ? "-" : ""}${stem}`;
+
     const stemLeafMap = {};
-    
     numericVals.forEach(v => {
-      // 10으로 나눈 목(줄기)과 나머지(잎)
-      const rounded = Math.round(v);
-      const stem = Math.floor(rounded / 10);
-      const leaf = rounded % 10;
-      
-      if (!stemLeafMap[stem]) stemLeafMap[stem] = [];
-      stemLeafMap[stem].push(leaf);
+      const { negative, stem, leaf } = toStemLeaf(v);
+      const key = stemKey(negative, stem);
+      if (!stemLeafMap[key]) stemLeafMap[key] = [];
+      stemLeafMap[key].push(leaf);
     });
 
-    let displayHtml = `<strong>[줄기-잎 그림]</strong> (단위: 십의 자리 | 일의 자리)\n\n`;
-    Object.keys(stemLeafMap).sort((a,b)=>parseInt(a)-parseInt(b)).forEach(stem => {
-      const leaves = stemLeafMap[stem].sort((a,b)=>a-b).join(" ");
-      displayHtml += `${String(stem).padStart(3, " ")} | ${leaves}\n`;
+    // 최소~최대 사이의 빈 줄기도 표시: 반올림한 정수값을 작은 쪽부터 훑으며 줄기를 순서대로 모음
+    // (잎 단위를 범위의 1/10~1/100로 정했으므로 훑는 정수는 최대 100여 개)
+    const minScaled = Math.round(numericVals[0] / leafUnit);
+    const maxScaled = Math.round(numericVals[numericVals.length - 1] / leafUnit);
+    const allStems = [];
+    const seenStems = new Set();
+    for (let sv = minScaled; sv <= maxScaled; sv++) {
+      const negative = sv < 0;
+      const stem = Math.floor(Math.abs(sv) / 10);
+      const key = stemKey(negative, stem);
+      if (!seenStems.has(key)) {
+        seenStems.add(key);
+        allStems.push({ negative, stem });
+      }
+    }
+
+    const fmtUnit = x => x.toFixed(unitDecimals);
+    const sample = toStemLeaf(numericVals[0]);
+    const sampleValue = (sample.negative ? -1 : 1) * (sample.stem * 10 + sample.leaf) * leafUnit;
+    let displayHtml = `<strong>[줄기-잎 그림]</strong> (잎 단위: ${fmtUnit(leafUnit)}, 예: ${stemKey(sample.negative, sample.stem)} | ${sample.leaf} = ${fmtUnit(sampleValue)})\n`;
+    if (numericVals.some(v => Math.abs(v / leafUnit - Math.round(v / leafUnit)) > 1e-9)) {
+      displayHtml += `※ 잎 단위보다 작은 자리는 반올림하여 표시했습니다.\n`;
+    }
+    displayHtml += `\n줄기 | 잎\n`;
+    const stemWidth = Math.max(4, ...allStems.map(a => stemKey(a.negative, a.stem).length));
+    allStems.forEach(a => {
+      const entry = stemLeafMap[stemKey(a.negative, a.stem)];
+      // 음수 줄기는 0에서 먼 잎부터 (왼쪽에서 오른쪽으로 값이 커지도록)
+      const leaves = entry ? entry.sort((x, y) => a.negative ? y - x : x - y).join(" ") : "";
+      displayHtml += `${stemKey(a.negative, a.stem).padStart(stemWidth, " ")} | ${leaves}\n`;
     });
-    
+
     stemLeaf.innerHTML = `<pre class="stem-leaf-box">${displayHtml}</pre>`;
   }
 
@@ -2282,7 +2334,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
 
 function renderDescInterpretation(var1, var2) {
   const box = document.getElementById("desc-korean-interpretation");
-  const data1 = AppState.data.map(r => r[var1]).filter(v => v !== "");
+  const data1 = AppState.data.map(r => r[var1]).filter(v => !isMissingValue(var1, v));
   const type1 = AppState.colTypes[var1];
 
   if (!var2) {
@@ -2322,7 +2374,7 @@ function renderDescMeanComparisonInterpretation(depVar, indVar, groups) {
   box.innerHTML = `
     <p>집단 변수 <strong>'${indVar}'</strong>의 하위 범주에 따른 분석 변수 <strong>'${depVar}'</strong>의 평균값을 교차 비교한 집단별 기술통계 결과입니다.</p>
     <p>기술통계 분석 결과: ${summaryParts.join(", ")} 등으로 나타났습니다.</p>
-    <p>이러한 집단 간 평균값 격차가 오차 범위 내의 우연한 차이인지, 혹은 모집단에서도 실재하는 유의미한 차이인지 검정하려면 **3단계 추론통계 분석의 '독립표본 t-검정(집단 2개)'** 또는 **'일원분산분석(ANOVA, 집단 3개 이상)'**을 실행해 보십시오.</p>
+    <p>이러한 집단 간 평균값 격차가 오차 범위 내의 우연한 차이인지, 혹은 모집단에서도 실재하는 유의미한 차이인지 검정하려면 <strong>3단계 추론통계 분석의 '독립표본 t-검정(집단 2개)'</strong> 또는 <strong>'일원분산분석(ANOVA, 집단 3개 이상)'</strong>을 실행해 보십시오.</p>
   `;
 }
 
@@ -2330,8 +2382,8 @@ function renderDescBivariateContinuousInterpretation(var1, var2) {
   const box = document.getElementById("desc-korean-interpretation");
   box.innerHTML = `
     <p>두 연속형(수치) 변수인 <strong>'${var1}'</strong>와 <strong>'${var2}'</strong>를 연계하여 나란히 기술통계를 분석한 결과입니다.</p>
-    <p>각각의 표본 평균 및 표준편차 등의 변동 특성을 비교해 볼 수 있으며, 우측의 산점도 그래프를 통해 두 요인이 직선 비례하거나 반비례하는 선형적 관계 패턴을 직관적으로 가늠해볼 수 있습니다.</p>
-    <p>두 수치형 요인의 관계 강도와 방향을 수학적으로 입증하려면 **3단계 추론통계 분석의 '피어슨 상관분석'** 또는 **'단순선형회귀분석'**을 통해 가설을 검정해보십시오.</p>
+    <p>각각의 표본 평균 및 표준편차 등의 변동 특성을 비교해 볼 수 있으며, 아래의 산점도를 통해 한 변수가 커질 때 다른 변수도 커지는지(양의 상관) 또는 작아지는지(음의 상관), 직선 형태의 관계가 보이는지 살펴볼 수 있습니다.</p>
+    <p>두 수치형 변수의 관계 강도와 방향을 통계적으로 검정하려면 <strong>3단계 추론통계 분석의 '피어슨 상관분석'</strong> 또는 <strong>'단순선형회귀분석'</strong>을 실행해 보십시오.</p>
   `;
 }
 
@@ -2571,11 +2623,11 @@ function updateInferMethodOptions() {
       });
       container.innerHTML = `
         <div class="form-group">
-          <label for="infer-select-var2">결과가 되는 종속변수 (Y, 수치형):</label>
+          <label for="infer-select-var2">종속변수 (Y, 예측하려는 수치형 변수):</label>
           <select id="infer-select-var2" class="form-control mt-1">${numOptionsHTML}</select>
         </div>
         <div class="form-group mt-3">
-          <label style="font-weight:600;">원인이 되는 독립변수 선택 (X, 수치형, 복수 선택):</label>
+          <label style="font-weight:600;">독립변수 선택 (X, 예측에 사용할 수치형 변수, 복수 선택):</label>
           <div class="checkbox-list-container" style="max-height: 150px; overflow-y: auto; padding: 10px; border: 1px solid var(--border-glass); border-radius: var(--radius-sm); margin-top: 6px; background-color: var(--bg-card);">
             ${xCheckboxes || "<p style='font-size:11px;color:var(--text-muted);'>선택 가능한 수치형 변수가 없습니다.</p>"}
           </div>
@@ -2613,11 +2665,11 @@ function updateInferMethodOptions() {
     case "regression":
       container.innerHTML = `
         <div class="form-group">
-          <label for="infer-select-var1">원인이 되는 독립변수 (X, 연속형):</label>
+          <label for="infer-select-var1">독립변수 (X, 예측에 사용할 연속형 변수):</label>
           <select id="infer-select-var1" class="form-control mt-1">${numOptionsHTML}</select>
         </div>
         <div class="form-group mt-3">
-          <label for="infer-select-var2">결과가 되는 종속변수 (Y, 연속형):</label>
+          <label for="infer-select-var2">종속변수 (Y, 예측하려는 연속형 변수):</label>
           <select id="infer-select-var2" class="form-control mt-1">${numOptionsHTML}</select>
         </div>
       `;
@@ -2652,6 +2704,17 @@ function updateInferMethodOptions() {
 
   // 저장된 이전의 폼 값과 가설 복원
   restoreInferState();
+}
+
+// p값 해석 문장 (p값 = 귀무가설이 참이라고 가정할 때 관측된 것만큼 이상의 결과가 나타날 확률)
+// nullText: 귀무가설 ("~다"로 끝나는 문장), conclusionText: 대립가설 결론 ("~다"로 끝나는 문장),
+// noEffectText: 유의하지 않을 때 오해하기 쉬운 단정 표현 (예: "차이가 없다")
+function pValueMeaningText(isSig, nullText, conclusionText, noEffectText) {
+  // 인용 어미: "~이다" → "~이라고", 그 외 "~다" → "~다고"
+  const quote = t => t.endsWith("이다") ? t.slice(0, -2) + "이라고" : t + "고";
+  return isSig
+    ? `즉, ${quote(nullText)} 가정하면 이만큼 이상의 결과가 나타날 확률(p값)이 5%보다 작으므로, ${quote(conclusionText)} 판단할 수 있습니다.`
+    : `즉, ${quote(nullText)} 가정해도 이 정도 결과는 충분히 나타날 수 있는 수준(p ≥ 0.05)이므로, ${quote(conclusionText)} 판단할 근거가 부족합니다. 이는 '${noEffectText}'는 뜻이 아니라 '있다고 말할 근거가 부족하다'는 뜻입니다.`;
 }
 
 function runInferentialAnalysis() {
@@ -2822,7 +2885,7 @@ function runOneSampleTTestAnalysis() {
   interpretation.innerHTML = `
     <p>수집된 표본 변수 <strong>'${varName}'</strong>의 평균(M = ${result.mean.toFixed(2)})이 기준치 <strong>${testValue}</strong>(와)과 통계적으로 유의미한 격차가 있는지 일표본 t-검정(One-sample t-test)을 실시했습니다.</p>
     <p>분석 결과, 표본 평균과 기준값의 차이는 <strong>${result.diff.toFixed(2)}</strong>로 나타났으며, 이 차이는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${result.tValue.toFixed(2)}, df = ${result.df}, p = ${result.pValue.toFixed(3)}).</p>
-    <p>${isSig ? `즉, 우연에 의해 이러한 차이가 관측되었을 확률이 5% 미만이므로, 표본 집단의 실제 평균은 기준값 ${testValue}와는 차이가 난다고 해석할 수 있습니다.` : `즉, 관측된 차이는 우연적 편차 범위 내이며, 표본 집단의 모평균이 기준치 ${testValue}와 다르다고 주장할 만한 근거가 충분하지 않습니다.`}</p>
+    <p>${pValueMeaningText(isSig, `모집단의 평균이 기준값(${testValue})과 같다`, `모집단의 평균은 기준값(${testValue})과 다르다`, "차이가 없다")}</p>
     <p>차이의 실질적 크기를 나타내는 효과크기(Cohen's d)는 <strong>${result.cohensD.toFixed(2)}</strong>(${effectLabel}) 수준입니다.</p>
   `;
 
@@ -2855,7 +2918,7 @@ function runOneSampleTTestAnalysis() {
 function runCIAnalysis() {
   const varName = document.getElementById("infer-select-var").value;
   const level = parseFloat(document.getElementById("infer-select-level").value);
-  const data = AppState.data.map(r => r[varName]).filter(v => v !== "");
+  const data = AppState.data.map(r => r[varName]).filter(v => !isMissingValue(varName, v));
 
   // 1. 가정 점검
   const normCheck = StatsHelper.checkNormality(data);
@@ -2878,7 +2941,7 @@ function runCIAnalysis() {
     <tr><td><strong>최소값 / 최대값</strong></td><td>${stats.min} / ${stats.max}</td><td>수집된 데이터의 범위</td></tr>
     <tr><td><strong>분포 종류</strong></td><td>${ci.distribution}</td><td>신뢰구간 도출용 임계값 분포</td></tr>
     <tr><td><strong>신뢰 한계선 (오차한계)</strong></td><td>±${ci.marginOfError.toFixed(4)}</td><td>평균에서 앞뒤로 멀어질 신뢰 구간 한계폭</td></tr>
-    <tr class="highlight-row"><td><strong>${level*100}% 신뢰구간</strong></td><td>[${ci.lower.toFixed(3)} ~ ${ci.upper.toFixed(3)}]</td><td>모평균이 이 구간 내에 있을 확률이 ${level*100}%임</td></tr>
+    <tr class="highlight-row"><td><strong>${level*100}% 신뢰구간</strong></td><td>[${ci.lower.toFixed(3)} ~ ${ci.upper.toFixed(3)}]</td><td>같은 방법으로 표본을 뽑아 구간을 반복해서 만들면, 그중 약 ${level*100}%가 모평균을 포함함</td></tr>
   `;
 
   // 4. 한국어 해석
@@ -3102,7 +3165,7 @@ function runIndependentTTestAnalysis() {
     <p><strong>'${groupVar}'</strong>에 속한 두 집단(${getValLabel(groupVar, gA)} vs ${getValLabel(groupVar, gB)}) 간에 <strong>'${varName}'</strong>의 평균에 유의미한 차이가 있는지 독립표본 t-검정을 실시하였습니다.</p>
     <p>르빈의 등분산 검정 결과(F = ${leveneFText}, p = ${lenevePText})에 의거하여, 통계적으로 <strong>'${passed ? "등분산 가정됨" : "등분산 가정되지 않음(Welch의 t-검정)"}'</strong> 행의 결과를 인용 채택합니다.</p>
     <p>분석 결과, 두 집단의 평균값 차이는 <strong>${tResult.diff.toFixed(2)}</strong>이며, 이 차이는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${activeResult.tValue.toFixed(2)}, df = ${activeResult.df.toFixed(2)}, p = ${activeResult.pValue.toFixed(3)}).</p>
-    <p>${isSig ? `즉, 우연히 이러한 차이가 관측될 확률이 5% 미만이므로, 두 집단 간에는 실제 평균 점수 차이가 존재한다고 결론 내릴 수 있습니다.` : `즉, 우연한 요인으로 발생할 수 있는 수준의 미미한 차이이므로, 두 집단 간에는 실제 평균적인 차이가 없다고 해석합니다.`}</p>
+    <p>${pValueMeaningText(isSig, "두 집단의 모집단 평균이 같다", "두 집단의 모집단 평균에 차이가 있다", "차이가 없다")}</p>
     <p>추가로 분석된 두 집단 차이의 실질적인 크기(효과크기, Cohen's d)는 <strong>${tResult.cohensD.toFixed(2)}</strong>로, <strong>${effectLabel}</strong>에 해당합니다.</p>
   `;
 
@@ -3205,7 +3268,7 @@ function runPairedTTestAnalysis() {
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${statsPost.mean.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${statsPost.n}명</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${statsPost.stdDev.toFixed(3)}</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">Whole${(statsPost.stdDev / Math.sqrt(statsPost.n)).toFixed(4)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${(statsPost.stdDev / Math.sqrt(statsPost.n)).toFixed(4)}</td>
             </tr>
           </tbody>
         </table>
@@ -3245,6 +3308,21 @@ function runPairedTTestAnalysis() {
     <tr class="highlight-row"><td><strong>유의확률 (p-value, 양측)</strong></td><td colspan="4"><strong>${tResult.pValue.toFixed(4)}</strong> (${sig})</td></tr>
     <tr><td><strong>효과크기 (Cohen's dz)</strong></td><td colspan="4"><strong>${tResult.cohensD.toFixed(3)}</strong></td></tr>
     <tr><td><strong>차이의 95% 신뢰구간</strong></td><td colspan="4">[${tResult.ciLower.toFixed(3)} ~ ${tResult.ciUpper.toFixed(3)}]</td></tr>
+  `;
+
+  // 4. 한국어 해석
+  const isSig = tResult.pValue < 0.05;
+  const changeText = tResult.meanDiff > 0 ? "증가" : tResult.meanDiff < 0 ? "감소" : "변화 없음";
+  let effectLabel = "매우 작은 효과 크기";
+  if (tResult.cohensD >= 0.8) effectLabel = "큰 효과 크기";
+  else if (tResult.cohensD >= 0.5) effectLabel = "중간 효과 크기";
+  else if (tResult.cohensD >= 0.2) effectLabel = "작은 효과 크기";
+
+  document.getElementById("infer-korean-interpretation").innerHTML = `
+    <p>같은 대상의 사전 측정값 <strong>'${var1}'</strong>과(와) 사후 측정값 <strong>'${var2}'</strong> 사이에 평균 차이가 있는지 대응표본 t-검정을 실시했습니다 (n = ${tResult.n}쌍).</p>
+    <p>분석 결과, 사후 평균에서 사전 평균을 뺀 평균 차이는 <strong>${tResult.meanDiff.toFixed(2)}</strong>(${changeText})이며, 이 차이는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${tResult.tValue.toFixed(2)}, df = ${tResult.df}, p = ${tResult.pValue.toFixed(3)}).</p>
+    <p>${pValueMeaningText(isSig, "모집단에서 사전과 사후의 평균이 같다", "모집단에서도 사전과 사후의 평균에 차이가 있다", "변화가 없다")}</p>
+    <p>평균 차이의 95% 신뢰구간은 <strong>[${tResult.ciLower.toFixed(2)} ~ ${tResult.ciUpper.toFixed(2)}]</strong>이고, 효과크기(Cohen's dz)는 <strong>${tResult.cohensD.toFixed(2)}</strong>로 <strong>${effectLabel}</strong>에 해당합니다 (0.2: 작음, 0.5: 중간, 0.8: 큼).</p>
   `;
 
   // 5. 시각화 (Error Bar)
@@ -3575,7 +3653,7 @@ function runAnovaAnalysis() {
   interpretation.innerHTML = `
     <p>집단 변수 <strong>'${groupVar}'</strong>에 의해 나누어진 세 개 이상의 집단 간에 <strong>'${varName}'</strong>의 평균값 차이가 있는지 일원분산분석(One-way ANOVA)을 수행했습니다.</p>
     <p>분석 결과, 집단 간 평균값들의 격차는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (F = ${anova.fValue.toFixed(2)}, p = ${anova.pValue.toFixed(3)}).</p>
-    <p>${isSig ? `즉, 집단 간 평균 차이가 단순히 우연히 나타났을 확률이 극히 희박하므로, 세 집단 중 적어도 어느 집단 간에는 유의미한 평균 차이가 존재합니다.` : `즉, 집단 간에 존재하는 차이는 단순 우연 편차 수준으로 볼 수 있어, 모집단에서 평균 차이가 실재한다고 볼 수 없습니다.`}</p>
+    <p>${pValueMeaningText(isSig, "모든 집단의 모집단 평균이 같다", "적어도 한 쌍의 집단 사이에는 모집단 평균에 차이가 있다", "차이가 없다")}</p>
     <p>요인의 실질적인 설명력 크기인 에타제곱(η²)은 <strong>${anova.etaSquared.toFixed(3)}</strong>로, 집단 분류가 전체 변동의 <strong>${(anova.etaSquared * 100).toFixed(1)}%</strong>를 설명하는 <strong>${effectLabel}</strong>에 해당합니다.</p>
     ${isSig && sigGroups.length > 0 ? `<p><strong>[사후검정 결과]</strong> 다중비교 보정을 통해 쌍별 비교를 수행한 결과, <strong>${sigGroups.join(", ")}</strong> 쌍 간에 통계적으로 유의미한 점수 차이가 확인되었습니다.</p>` : ""}
   `;
@@ -3853,8 +3931,8 @@ function runChiSquareIndAnalysis() {
 
   interpretation.innerHTML = `
     <p>범주형 변수 <strong>'${var1}'</strong>와 <strong>'${var2}'</strong> 사이에 유의미한 연관성(독립 여부)이 존재하는지 교차 카이제곱 독립성 검정을 수행했습니다.</p>
-    <p>분석 결과, 두 변수의 연관 상태는 통계적으로 <strong>${isSig ? "유의미하게 관련이 있습니다" : "유의미하게 관련이 없습니다"}</strong> (χ² = ${chisq.chi2Value.toFixed(2)}, p = ${chisq.pValue.toFixed(3)}).</p>
-    <p>${isSig ? `즉, '${var1}'의 항목 구분에 따라 '${var2}'의 응답 분배가 완전히 무작위가 아니라, 특정 조합에 쏠리는 상관관계(연동현상)가 입증되었습니다.` : `즉, 두 변수 응답 분배는 통계적으로 볼 때 서로 아무런 영향을 미치지 않는 독립적인 형태를 취하고 있습니다.`}</p>
+    <p>분석 결과, 두 변수의 연관성은 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (χ² = ${chisq.chi2Value.toFixed(2)}, p = ${chisq.pValue.toFixed(3)}).</p>
+    <p>${pValueMeaningText(isSig, `'${var1}'와(과) '${var2}'이(가) 서로 관련이 없다`, `'${var1}'의 범주에 따라 '${var2}'의 분포가 달라진다`, "연관성이 없다")}</p>
     <p>상관적 긴밀도를 보인 효과크기(Cramér's V)는 <strong>${chisq.cramersV.toFixed(2)}</strong>로, <strong>${effectLabel}</strong>에 속합니다.</p>
   `;
 
@@ -4066,7 +4144,7 @@ function runCorrelationAnalysis() {
   const isSig = corr.pValue < 0.05;
   const interpretation = document.getElementById("infer-korean-interpretation");
   
-  let strengthLabel = "관계 없음";
+  let strengthLabel = "매우 약한";
   const absR = Math.abs(r);
   if (absR >= 0.7) strengthLabel = "매우 강한";
   else if (absR >= 0.4) strengthLabel = "비교적 뚜렷한";
@@ -4077,7 +4155,7 @@ function runCorrelationAnalysis() {
   interpretation.innerHTML = `
     <p>연속형 수치 변수인 <strong>'${var1}'</strong>와 <strong>'${var2}'</strong> 사이에 일차함수적인 선형 관계가 있는지 피어슨 상관분석을 실시했습니다.</p>
     <p>분석 결과, 상관계수 r은 <strong>${r.toFixed(3)}</strong>이며, 이 관계는 통계적으로 <strong>${isSig ? "유의미합니다" : "유의미하지 않습니다"}</strong> (t = ${corr.tValue.toFixed(2)}, p = ${corr.pValue.toFixed(3)}).</p>
-    <p>${isSig ? `즉, 두 변수 사이에는 실제 <strong>${strengthLabel} ${directionLabel}</strong>가 성립합니다.` : `즉, 통계적으로 관측된 관계 수준이 무시할 수 있는 우연 범위 내이므로, 두 변수는 아무 선형 관계를 가지고 있지 않습니다.`}</p>
+    <p>${pValueMeaningText(isSig, "모집단에서 두 변수의 상관계수가 0이다", "모집단에서도 두 변수 사이에 선형 관계가 있다", "관계가 없다")}${isSig ? ` 관계의 방향과 강도는 <strong>${strengthLabel} ${directionLabel}</strong>입니다.` : ""}</p>
   `;
 
   // 6. 경고판
@@ -4321,19 +4399,18 @@ function runRegressionAnalysis() {
     return;
   }
 
-  // 1. 가정 점검
-  const norm1 = StatsHelper.checkNormality(data1);
-  const norm2 = StatsHelper.checkNormality(data2);
-  norm1.reason = `독립변수 정규성: ` + norm1.reason;
-  norm2.reason = `종속변수 정규성: ` + norm2.reason;
-  renderAssumptionDashboard([norm1, norm2, smallSampleCheck("reg", data1.length)]);
-
-  // 2. 연산
+  // 1. 연산
   const reg = StatsHelper.linearRegression(data1, data2);
   if (reg.error) {
     alert(reg.error);
     return;
   }
+  const residuals = data1.map((x, i) => data2[i] - (reg.slope * x + reg.intercept));
+
+  // 2. 가정 점검 (회귀분석의 정규성 가정은 X·Y가 아니라 잔차에 대한 것)
+  const residNorm = StatsHelper.checkNormality(residuals);
+  residNorm.reason = `잔차 정규성: ` + residNorm.reason;
+  renderAssumptionDashboard([residNorm, smallSampleCheck("reg", data1.length)]);
 
   // 3. 결과 요약표
   const table = document.getElementById("infer-result-table");
@@ -4523,10 +4600,8 @@ function runRegressionAnalysis() {
   const ctx = document.getElementById("infer-chart");
   if (AppState.chartInstance) AppState.chartInstance.destroy();
 
-  const points = AppState.data.map(row => ({
-    x: parseFloat(row[var1]),
-    y: parseFloat(row[var2])
-  })).filter(pt => !isNaN(pt.x) && !isNaN(pt.y));
+  // 결측값을 제외하고 분석에 사용한 data1/data2로 그림
+  const points = data1.map((x, i) => ({ x, y: data2[i] }));
 
   const xVals = points.map(p => p.x);
   const minX = Math.min(...xVals);
@@ -4582,7 +4657,7 @@ function runRegressionAnalysis() {
   renderResidualCard({
     xValues: data1,
     yValues: data2,
-    residuals: data1.map((x, i) => data2[i] - (reg.slope * x + reg.intercept)),
+    residuals,
     xLabel: var1,
     numParams: 2,
     baseOrder: 1,
@@ -4594,7 +4669,7 @@ function runRegressionAnalysis() {
   const interpretation = document.getElementById("infer-korean-interpretation");
   
   interpretation.innerHTML = `
-    <p>원인(독립변수) <strong>'${var1}'</strong>이(가) 결과(종속변수) <strong>'${var2}'</strong>을(를) 통계적으로 유의미하게 예측하는지 단순선형회귀분석을 적용했습니다.</p>
+    <p>독립변수 <strong>'${var1}'</strong>(으)로 종속변수 <strong>'${var2}'</strong>을(를) 통계적으로 유의미하게 예측할 수 있는지 단순선형회귀분석을 적용했습니다.</p>
     <p>분석 결과 도출된 회귀모형은 통계적으로 <strong>${isSig ? "유의미하게 타당합니다" : "유의미한 타당성을 얻지 못했습니다"}</strong> (F = ${reg.fValue.toFixed(2)}, p = ${reg.pValueF.toFixed(3)}).</p>
     <p>이 모형의 설명력(결정계수 R²)은 <strong>${reg.rSquared.toFixed(4)}</strong>이며, 이는 독립변수 '${var1}'이 종속변수 '${var2}' 전체 변동의 약 <strong>${(reg.rSquared * 100).toFixed(2)}%</strong>를 설명(예측)해내고 있음을 의미합니다.</p>
     <p>회귀 기울기 값은 <strong>${reg.slope.toFixed(3)}</strong>로 나타나, '${var1}'가 1단위 증가할 때마다 '${var2}'가 약 <strong>${reg.slope.toFixed(2)}</strong>만큼 ${reg.slope > 0 ? '증가' : '감소'}하는 선형 관계가 나타날 것으로 추정됩니다.</p>
@@ -5041,7 +5116,7 @@ function runMultipleRegressionAnalysis() {
   const varXList = Array.from(checkedBoxes).map(cb => cb.value);
 
   if (varXList.length === 0) {
-    alert("원인이 되는 독립변수(X)를 최소 1개 이상 선택해 주십시오.");
+    alert("독립변수(X)를 최소 1개 이상 선택해 주십시오.");
     return;
   }
 
@@ -5077,23 +5152,22 @@ function runMultipleRegressionAnalysis() {
     return;
   }
 
-  // 1. 가정 점검
-  const assumptionChecks = [];
-  varXList.forEach(x => {
-    const xCol = xDataList.map(row => row[varXList.indexOf(x)]);
-    const norm = StatsHelper.checkNormality(xCol);
-    norm.reason = `독립변수 '${x}' 정규성: ` + norm.reason;
-    assumptionChecks.push(norm);
-  });
-  assumptionChecks.push(smallSampleCheck("multireg", n, p));
-  renderAssumptionDashboard(assumptionChecks);
-
-  // 2. 연산
+  // 1. 연산
   const reg = StatsHelper.multipleLinearRegression(xDataList, yData, varXList);
   if (reg.error) {
     alert(reg.error);
     return;
   }
+
+  // 2. 가정 점검 (회귀분석의 정규성 가정은 독립변수가 아니라 잔차에 대한 것)
+  const residuals = yData.map((y, i) => {
+    let pred = reg.coefficients[0].b;
+    for (let j = 0; j < p; j++) pred += reg.coefficients[j + 1].b * xDataList[i][j];
+    return y - pred;
+  });
+  const residNorm = StatsHelper.checkNormality(residuals);
+  residNorm.reason = `잔차 정규성: ` + residNorm.reason;
+  renderAssumptionDashboard([residNorm, smallSampleCheck("multireg", n, p)]);
 
   // 3. 결과 요약표
   const table = document.getElementById("infer-result-table");
@@ -5315,13 +5389,13 @@ function runMultipleRegressionAnalysis() {
 
   let keyFactorText = "";
   if (keyFactor && keyFactor.pValue < 0.05) {
-    keyFactorText = `<p>그중 표준화계수(Beta = <strong>${keyFactor.beta.toFixed(3)}</strong>)에 근거하여 종속변수에 가장 결정적 영향력을 행사하는 핵심 원인 변수는 <strong>'${keyFactor.name}'</strong>인 것으로 규명되었습니다.</p>`;
+    keyFactorText = `<p>표준화계수(Beta)의 절댓값이 가장 큰 변수는 <strong>'${keyFactor.name}'</strong>(Beta = <strong>${keyFactor.beta.toFixed(3)}</strong>)로, 다른 독립변수를 함께 고려했을 때 종속변수 예측에 가장 크게 기여합니다. 이것이 '가장 큰 원인'이라는 뜻은 아닙니다.</p>`;
   }
 
   interpretation.innerHTML = `
     <p>독립변수군(${varXList.map(x => `'${x}'`).join(", ")})이 종속변수 <strong>'${varY}'</strong>에 유의미한 예측 효과를 미치는지 다중선형회귀분석을 구동하였습니다.</p>
     <p>분석결과, 회귀 모형의 분산분석 유의성 검정 F값은 <strong>${reg.fValue.toFixed(3)}</strong>이며, 모델 유의확률 p값은 <strong>${reg.pValueF.toFixed(4)}</strong>로 나타나 통계적으로 <strong>${isModelSig ? "유의미하게 타당합니다" : "유의미하지 않습니다"}</strong>.</p>
-    <p>모형의 전체 결정계수(R-Square)는 <strong>${reg.rSquared.toFixed(4)}</strong>로, 이 회귀식의 원인 변수들이 결과 요인인 '${varY}' 총변동의 약 <strong>${(reg.rSquared*100).toFixed(1)}%</strong>를 유의하게 설명하고 있습니다.</p>
+    <p>모형의 전체 결정계수(R-Square)는 <strong>${reg.rSquared.toFixed(4)}</strong>로, 선택한 독립변수들이 종속변수 '${varY}' 전체 변동의 약 <strong>${(reg.rSquared*100).toFixed(1)}%</strong>를 설명합니다.</p>
     ${isModelSig && sigVariables.length > 0 
       ? `<p>회귀계수 유의성을 개별 검정한 결과, 독립변수들 중 <strong>${sigVarNames.join(", ")}</strong> 요인(들)이 5% 유의수준 하에서 통계적으로 유의한 예측 기여를 하는 것으로 실증되었습니다.</p>`
       : `<p>개별 독립변수들의 회귀계수(B) 중 5% 유의수준에서 유의미한 독자적 설명력을 가지는 요인은 없는 것으로 나타났습니다.</p>`
@@ -5778,16 +5852,16 @@ function initWizard() {
       }
     } else if (recommendedMethod === "correlation") {
       if (nameEl) nameEl.textContent = "피어슨 상관분석 (Pearson Correlation)";
-      if (descEl) descEl.textContent = "하루 공부 시간과 기말고사 성적처럼, 두 연속형 변수가 얼마나 일직선 방향으로 비례하여 밀접하게 연관되어 있는지 평가합니다.";
+      if (descEl) descEl.textContent = "하루 공부 시간과 기말고사 성적처럼, 두 연속형 변수 사이의 직선 관계가 얼마나 강한지, 그리고 양(+)의 관계인지 음(−)의 관계인지 평가합니다.";
       if (assumptionsEl) {
         assumptionsEl.innerHTML = `
-          <li>선형성 가정: 두 변수 관계가 곡선이 아닌 직선 비례 성향이어야 합니다.</li>
+          <li>선형성 가정: 두 변수의 관계가 곡선이 아닌 직선 형태여야 합니다.</li>
           <li>인과 오용 경고: 상관이 아무리 높아도 한 요인이 다른 쪽의 직접적 원인이라고 단정하면 안 됩니다.</li>
         `;
       }
     } else if (recommendedMethod === "regression") {
       if (nameEl) nameEl.textContent = "단순선형회귀분석 (Simple Linear Regression)";
-      if (descEl) descEl.textContent = "독립변수 1개가 종속변수 1개에 미치는 선형적 영향력과 인과적 수식 방정식을 도출하고 미래 값을 예측합니다.";
+      if (descEl) descEl.textContent = "독립변수 1개로 종속변수 1개를 예측하는 직선 회귀식(Y = a + bX)을 구하고, 그 관계가 통계적으로 유의한지 검정합니다.";
       if (assumptionsEl) {
         assumptionsEl.innerHTML = `
           <li>선형성 가정: 독립변수와 종속변수 간 관계가 곡선이 아닌 직선 형태로 변화해야 합니다.</li>
@@ -5796,7 +5870,7 @@ function initWizard() {
       }
     } else if (recommendedMethod === "multireg") {
       if (nameEl) nameEl.textContent = "다중선형회귀분석 (Multiple Linear Regression)";
-      if (descEl) descEl.textContent = "수면 시간, 공부 시간 등 여러 독립변수들이 하나의 결과 성적(종속변수)에 미치는 영향력을 인과 분석하고 예측 방정식을 세웁니다.";
+      if (descEl) descEl.textContent = "수면 시간, 공부 시간 등 여러 독립변수를 함께 사용해 하나의 종속변수(예: 성적)를 예측하는 회귀식을 세우고, 각 변수의 기여도를 비교합니다.";
       if (assumptionsEl) {
         assumptionsEl.innerHTML = `
           <li>다중공선성 주의: 독립변수들끼리 강력한 상관이 얽혀 통계가 파괴되지 않게 검증해야 합니다 (VIF 분석 등).</li>
