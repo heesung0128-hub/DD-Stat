@@ -4253,12 +4253,16 @@ function buildLackOfFitInterpretationHtml(lof, modelLabel, suggestPolynomial) {
 
 // 잔차 그래프 카드 렌더링 + 잔차 패턴 자동 점검
 // opts: { xValues, yValues, residuals, xLabel, numParams(회귀식 계수 개수), baseOrder(다항 차수, 단순회귀는 1),
-//         modelLabel(해석 문구에 쓸 모형 이름), suggestPolynomial, curveHint(곡선 패턴이 남았을 때 덧붙일 안내) }
+//         modelLabel(해석 문구에 쓸 모형 이름), suggestPolynomial, curveHint(곡선 패턴이 남았을 때 덧붙일 안내),
+//         basisHtml(잔차 계산에 사용한 모형을 강조해 보여줄 안내, 없으면 숨김) }
 function renderResidualCard(opts) {
-  const { xValues, yValues, residuals, xLabel, numParams, baseOrder = 1, modelLabel = "단순 직선 모형", suggestPolynomial = false, curveHint = "" } = opts;
+  const { xValues, yValues, residuals, xLabel, numParams, baseOrder = 1, modelLabel = "단순 직선 모형", suggestPolynomial = false, curveHint = "", basisHtml = "" } = opts;
   const n = residuals.length;
   const card = document.getElementById("infer-residual-card");
   card.classList.remove("hidden");
+  const basisBox = document.getElementById("infer-residual-basis");
+  basisBox.innerHTML = basisHtml;
+  basisBox.classList.toggle("hidden", !basisHtml);
 
   // 표준화 잔차 = 잔차 / 추정값의 표준오차 (|값| > 2 이면 큰 잔차로 표시)
   const sse = residuals.reduce((s, e) => s + e * e, 0);
@@ -4304,7 +4308,7 @@ function renderResidualCard(opts) {
       responsive: true,
       plugins: {
         legend: { labels: { color: textColor } },
-        title: { display: true, text: `잔차 그래프 - ${modelLabel} (X: ${xLabel})`, color: textColor },
+        title: { display: true, text: `잔차 그래프 - ${modelLabel}${basisHtml ? " (채택 모형)" : ""} (X: ${xLabel})`, color: textColor },
         tooltip: {
           callbacks: {
             label: c => c.datasetIndex === 0
@@ -4995,7 +4999,9 @@ function runPolynomialRegressionAnalysis() {
     numParams: chosen.numParams,
     baseOrder: chosen.order,
     modelLabel: modelShortNames[chosen.order],
-    curveHint: fittedMaxOrder < 3 ? "'비교할 최고 차수'를 3차로 바꿔 다시 분석해 보세요." : ""
+    curveHint: fittedMaxOrder < 3 ? "'비교할 최고 차수'를 3차로 바꿔 다시 분석해 보세요." : "",
+    basisHtml: `<i class="fa-solid fa-star"></i> 이 잔차는 위 모형 비교에서 채택된 <strong>${modelTitles[chosen.order]}</strong>로 계산했습니다.<br>
+      <span style="font-size:12px;">사용한 회귀식: ${equation} · R² = ${chosen.rSquared.toFixed(4)}</span>`
   });
 
   // 6. 시각화: 산점도 + 직선 + 곡선 동시 표시

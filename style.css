@@ -905,6 +905,21 @@ a {
   justify-content: flex-end;
 }
 
+/* 잔차 그래프: 계산에 사용한 채택 모형 안내 */
+.residual-basis-banner {
+  border: 1px solid var(--primary);
+  border-left: 5px solid var(--primary);
+  background-color: rgba(114, 46, 209, 0.08);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.residual-basis-banner strong {
+  color: var(--primary);
+}
+
 /* 도움말 모달 */
 .modal-wide {
   max-width: 640px;
