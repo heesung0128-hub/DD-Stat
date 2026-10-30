@@ -192,6 +192,7 @@ const AppState = {
   valueLabels: {}, // 값 레이블 매핑: { '성별': { '1': '남자', '2': '여자' } }
   missingRules: {}, // 각 열별 결측값 규칙 지정: { '수면_시간': '99, 999' }
   chartInstance: null, // Chart.js 인스턴스
+  residualChartInstance: null, // 잔차 그래프 Chart.js 인스턴스
   selectedRows: new Set(), // 삭제용 선택 행 번호
   hypothesis: "",  // 연구 가설
   inferState: {
@@ -2677,6 +2678,7 @@ function runInferentialAnalysis() {
   // 기본 차트/사후검정 초기화 숨김
   document.getElementById("anova-posthoc-card").classList.add("hidden");
   document.getElementById("infer-chart-card").classList.add("hidden");
+  document.getElementById("infer-residual-card").classList.add("hidden");
 
   // 분석 실행 호출 분기
   switch(method) {
@@ -4150,6 +4152,124 @@ function buildLackOfFitInterpretationHtml(lof, modelLabel, suggestPolynomial) {
   return `<p><strong>[적합도 결여 검정]</strong> 서로 다른 X 값 ${lof.m}개에서 반복 측정된 데이터로 잔차를 분해한 결과, 적합도 결여는 통계적으로 <strong>유의하지 않습니다</strong> (${fText}). 남은 잔차는 반복 측정의 우연한 흔들림(순수 오차) 수준이므로 <strong>'${modelLabel}'으로 데이터의 패턴을 설명하기에 충분합니다.</strong></p>`;
 }
 
+// 잔차 그래프 카드 렌더링 + 잔차 패턴 자동 점검
+// opts: { xValues, yValues, residuals, xLabel, numParams(회귀식 계수 개수), baseOrder(다항 차수, 단순회귀는 1), suggestPolynomial }
+function renderResidualCard(opts) {
+  const { xValues, yValues, residuals, xLabel, numParams, baseOrder = 1, suggestPolynomial = false } = opts;
+  const n = residuals.length;
+  const card = document.getElementById("infer-residual-card");
+  card.classList.remove("hidden");
+
+  // 표준화 잔차 = 잔차 / 추정값의 표준오차 (|값| > 2 이면 큰 잔차로 표시)
+  const sse = residuals.reduce((s, e) => s + e * e, 0);
+  const dfRes = n - numParams;
+  const se = dfRes > 0 ? Math.sqrt(sse / dfRes) : 0;
+  const stdRes = residuals.map(e => se > 0 ? e / se : 0);
+  const isLarge = stdRes.map(z => Math.abs(z) > 2);
+
+  // 1. 차트
+  const ctx = document.getElementById("infer-residual-chart");
+  if (AppState.residualChartInstance) AppState.residualChartInstance.destroy();
+  const isDark = AppState.theme === "dark";
+  const textColor = isDark ? "#c8cdd4" : "#2d3748";
+  const gridColor = isDark ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.06)";
+  const minX = Math.min(...xValues);
+  const maxX = Math.max(...xValues);
+
+  AppState.residualChartInstance = new Chart(ctx, {
+    type: "scatter",
+    data: {
+      datasets: [
+        {
+          label: "잔차",
+          data: xValues.map((x, i) => ({ x, y: residuals[i] })),
+          backgroundColor: isLarge.map(l => l ? "rgba(229, 62, 62, 0.85)" : "rgba(14, 140, 180, 0.75)"),
+          borderColor: isLarge.map(l => l ? "rgba(229, 62, 62, 1)" : "rgba(14, 140, 180, 1)"),
+          borderWidth: 1,
+          pointRadius: 5
+        },
+        {
+          label: "기준선 (잔차 = 0)",
+          data: [{ x: minX, y: 0 }, { x: maxX, y: 0 }],
+          type: "line",
+          borderColor: "#e53e3e",
+          borderWidth: 2,
+          borderDash: [5, 4],
+          fill: false,
+          pointRadius: 0
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { labels: { color: textColor } },
+        title: { display: true, text: `잔차 그래프 (X: ${xLabel})`, color: textColor },
+        tooltip: {
+          callbacks: {
+            label: c => c.datasetIndex === 0
+              ? `X = ${c.parsed.x}, 잔차 = ${fmtStat(c.parsed.y, 4)} (표준화 ${stdRes[c.dataIndex].toFixed(2)})`
+              : "잔차 = 0"
+          }
+        }
+      },
+      scales: {
+        x: { type: "linear", title: { display: true, text: xLabel, color: textColor }, grid: { color: gridColor }, ticks: { color: textColor } },
+        y: { title: { display: true, text: "잔차 (실제값 − 예측값)", color: textColor }, grid: { color: gridColor }, ticks: { color: textColor } }
+      }
+    }
+  });
+
+  document.getElementById("btn-download-residual-chart").onclick = () => {
+    const a = document.createElement("a");
+    a.href = ctx.toDataURL("image/png");
+    a.download = `Residual_${xLabel.replace(/\s+/g, "_")}.png`;
+    a.click();
+  };
+
+  // 2. 잔차 패턴 점검
+  const items = [];
+
+  // (1) 곡선 패턴: 잔차에 한 차수 높은 항이 남아 있는지 검정 (단순회귀에서는 증분 F-검정과 같은 결과)
+  const curveOrder = baseOrder + 1;
+  const curveFit = n >= curveOrder + 2 ? StatsHelper.polynomialRegression(xValues, residuals, curveOrder) : { error: true };
+  if (!curveFit.error) {
+    const pCurve = curveFit.coefficients[curveOrder].pValue;
+    const termLabel = curveOrder === 2 ? "X²" : "X³";
+    items.push(pCurve < 0.05
+      ? { level: "warning", text: `<strong>곡선 패턴 있음</strong> — 잔차가 U자 또는 역U자처럼 휘어진 모양을 보입니다 (${termLabel}항 검정 ${pCurve < 0.001 ? "p < .001" : `p = ${pCurve.toFixed(3)}`}). 직선으로 설명되지 않는 곡선 경향이 남아 있습니다.${suggestPolynomial ? ` '10. 다항회귀분석'으로 곡선 모형과 비교해 보세요. <button class="btn btn-xs btn-outline" onclick="switchToPolynomialRegression()"><i class="fa-solid fa-bezier-curve"></i> 다항회귀분석으로 이동</button>` : ""}` }
+      : { level: "success", text: `<strong>곡선 패턴 없음</strong> — 잔차에서 뚜렷한 휘어진 모양이 발견되지 않았습니다 (${termLabel}항 검정 ${pCurve < 0.001 ? "p < .001" : `p = ${pCurve.toFixed(3)}`}).` });
+  }
+
+  // (2) 퍼짐 변화: X가 커질수록 잔차의 크기가 커지거나 작아지는지 (깔때기 모양 → 등분산 가정 위배 가능)
+  if (n >= 5) {
+    const spread = StatsHelper.correlationAnalysis(xValues, residuals.map(e => Math.abs(e)));
+    if (!spread.error) {
+      const r = spread.correlationCoefficient;
+      items.push(spread.pValue < 0.05
+        ? { level: "warning", text: `<strong>퍼짐이 고르지 않음</strong> — X가 커질수록 잔차의 크기가 ${r > 0 ? "커지는" : "작아지는"} 깔때기 모양입니다 (r = ${r.toFixed(2)}, ${spread.pValue < 0.001 ? "p < .001" : `p = ${spread.pValue.toFixed(3)}`}). 오차의 크기가 일정하다는 가정(등분산성)이 맞지 않을 수 있어 검정 결과 해석에 주의가 필요합니다.` }
+        : { level: "success", text: `<strong>퍼짐이 고름</strong> — X 값에 따라 잔차의 크기가 뚜렷하게 변하지 않습니다 (r = ${r.toFixed(2)}, ${spread.pValue < 0.001 ? "p < .001" : `p = ${spread.pValue.toFixed(3)}`}).` });
+    }
+  }
+
+  // (3) 큰 잔차: 표준화 잔차의 절댓값이 2를 넘는 점
+  const largeIdx = isLarge.map((l, i) => l ? i : -1).filter(i => i >= 0);
+  if (dfRes > 0) {
+    items.push(largeIdx.length > 0
+      ? { level: "warning", text: `<strong>큰 잔차 ${largeIdx.length}개</strong> (그래프의 빨간 점) — 예측에서 크게 벗어난 점입니다: ${largeIdx.slice(0, 5).map(i => `X = ${xValues[i]}, Y = ${yValues[i]} (표준화 잔차 ${stdRes[i].toFixed(2)})`).join("; ")}${largeIdx.length > 5 ? " 등" : ""}. 측정이나 입력 오류가 아닌지 확인해 보세요.` }
+      : { level: "success", text: `<strong>큰 잔차 없음</strong> — 표준화 잔차의 절댓값이 2를 넘는 점이 없습니다.` });
+  }
+
+  const icons = { success: "fa-circle-check", warning: "fa-triangle-exclamation" };
+  const colors = { success: "var(--success)", warning: "var(--warning)" };
+  let html = `<p><strong><i class="fa-solid fa-magnifying-glass-chart"></i> 잔차 패턴 자동 점검</strong></p>`;
+  html += items.map(it => `<p style="margin:4px 0;"><i class="fa-solid ${icons[it.level]}" style="color:${colors[it.level]};"></i> ${it.text}</p>`).join("");
+  if (n < 8) {
+    html += `<p style="font-size:11px; color:var(--text-muted);">※ 데이터가 ${n}개로 적어 잔차 패턴을 판단하기 어렵습니다. 자동 점검 결과보다 그래프를 직접 보고 참고용으로 활용하세요.</p>`;
+  }
+  document.getElementById("infer-residual-checks").innerHTML = html;
+}
+
 // 단순회귀 결과에서 다항회귀분석으로 전환 (선택한 X, Y 변수 유지)
 function switchToPolynomialRegression() {
   const var1 = document.getElementById("infer-select-var1");
@@ -4441,6 +4561,17 @@ function runRegressionAnalysis() {
         y: { title: { display: true, text: var2, color: textColor }, grid: { color: gridColor }, ticks: { color: textColor } }
       }
     }
+  });
+
+  // 4-1. 잔차 그래프
+  renderResidualCard({
+    xValues: data1,
+    yValues: data2,
+    residuals: data1.map((x, i) => data2[i] - (reg.slope * x + reg.intercept)),
+    xLabel: var1,
+    numParams: 2,
+    baseOrder: 1,
+    suggestPolynomial: true
   });
 
   // 5. 한국어 해석
