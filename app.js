@@ -4153,9 +4153,10 @@ function buildLackOfFitInterpretationHtml(lof, modelLabel, suggestPolynomial) {
 }
 
 // 잔차 그래프 카드 렌더링 + 잔차 패턴 자동 점검
-// opts: { xValues, yValues, residuals, xLabel, numParams(회귀식 계수 개수), baseOrder(다항 차수, 단순회귀는 1), suggestPolynomial }
+// opts: { xValues, yValues, residuals, xLabel, numParams(회귀식 계수 개수), baseOrder(다항 차수, 단순회귀는 1),
+//         modelLabel(해석 문구에 쓸 모형 이름), suggestPolynomial, curveHint(곡선 패턴이 남았을 때 덧붙일 안내) }
 function renderResidualCard(opts) {
-  const { xValues, yValues, residuals, xLabel, numParams, baseOrder = 1, suggestPolynomial = false } = opts;
+  const { xValues, yValues, residuals, xLabel, numParams, baseOrder = 1, modelLabel = "단순 직선 모형", suggestPolynomial = false, curveHint = "" } = opts;
   const n = residuals.length;
   const card = document.getElementById("infer-residual-card");
   card.classList.remove("hidden");
@@ -4204,7 +4205,7 @@ function renderResidualCard(opts) {
       responsive: true,
       plugins: {
         legend: { labels: { color: textColor } },
-        title: { display: true, text: `잔차 그래프 (X: ${xLabel})`, color: textColor },
+        title: { display: true, text: `잔차 그래프 - ${modelLabel} (X: ${xLabel})`, color: textColor },
         tooltip: {
           callbacks: {
             label: c => c.datasetIndex === 0
@@ -4230,15 +4231,29 @@ function renderResidualCard(opts) {
   // 2. 잔차 패턴 점검
   const items = [];
 
-  // (1) 곡선 패턴: 잔차에 한 차수 높은 항이 남아 있는지 검정 (단순회귀에서는 증분 F-검정과 같은 결과)
-  const curveOrder = baseOrder + 1;
-  const curveFit = n >= curveOrder + 2 ? StatsHelper.polynomialRegression(xValues, residuals, curveOrder) : { error: true };
-  if (!curveFit.error) {
-    const pCurve = curveFit.coefficients[curveOrder].pValue;
-    const termLabel = curveOrder === 2 ? "X²" : "X³";
-    items.push(pCurve < 0.05
-      ? { level: "warning", text: `<strong>곡선 패턴 있음</strong> — 잔차가 U자 또는 역U자처럼 휘어진 모양을 보입니다 (${termLabel}항 검정 ${pCurve < 0.001 ? "p < .001" : `p = ${pCurve.toFixed(3)}`}). 직선으로 설명되지 않는 곡선 경향이 남아 있습니다.${suggestPolynomial ? ` '10. 다항회귀분석'으로 곡선 모형과 비교해 보세요. <button class="btn btn-xs btn-outline" onclick="switchToPolynomialRegression()"><i class="fa-solid fa-bezier-curve"></i> 다항회귀분석으로 이동</button>` : ""}` }
-      : { level: "success", text: `<strong>곡선 패턴 없음</strong> — 잔차에서 뚜렷한 휘어진 모양이 발견되지 않았습니다 (${termLabel}항 검정 ${pCurve < 0.001 ? "p < .001" : `p = ${pCurve.toFixed(3)}`}).` });
+  // (1) 곡선 패턴: 잔차에 더 높은 차수의 항이 남아 있는지 검정 (3차까지)
+  //  - 한 차수 높은 항 단독 검정 (단순회귀에서는 증분 F-검정과 같은 결과): U자/역U자형 휘어짐
+  //  - 3차까지의 항을 함께 검정: S자처럼 좌우가 반대로 휘어 한 차수 검정으로는 놓치는 모양
+  const fmtCurveP = pv => pv < 0.001 ? "p < .001" : `p = ${pv.toFixed(3)}`;
+  const powLabel = ["", "X", "X²", "X³"];
+  const curveTests = [];
+  if (baseOrder + 1 <= 3 && n >= baseOrder + 3) {
+    const fit = StatsHelper.polynomialRegression(xValues, residuals, baseOrder + 1);
+    if (!fit.error) curveTests.push({ label: `${powLabel[baseOrder + 1]}항`, p: fit.coefficients[baseOrder + 1].pValue });
+  }
+  if (baseOrder + 2 <= 3 && n >= 5) {
+    const reduced = StatsHelper.polynomialRegression(xValues, residuals, baseOrder);
+    const full = StatsHelper.polynomialRegression(xValues, residuals, 3);
+    if (!reduced.error && !full.error) {
+      curveTests.push({ label: `${powLabel.slice(baseOrder + 1, 4).join("·")}항 함께`, p: StatsHelper.compareNestedModels(reduced, full).pValue });
+    }
+  }
+  if (curveTests.length > 0) {
+    const testText = curveTests.map(t => `${t.label} 검정 ${fmtCurveP(t.p)}`).join(", ");
+    const curved = curveTests.some(t => t.p < 0.05);
+    items.push(curved
+      ? { level: "warning", text: `<strong>곡선 패턴 있음</strong> — 잔차가 U자·역U자 또는 S자처럼 휘어진 모양을 보입니다 (${testText}). ${modelLabel}으로 설명되지 않는 곡선 경향이 남아 있습니다.${curveHint ? ` ${curveHint}` : ""}${suggestPolynomial ? ` '10. 다항회귀분석'으로 곡선 모형과 비교해 보세요. <button class="btn btn-xs btn-outline" onclick="switchToPolynomialRegression()"><i class="fa-solid fa-bezier-curve"></i> 다항회귀분석으로 이동</button>` : ""}` }
+      : { level: "success", text: `<strong>곡선 패턴 없음</strong> — 잔차에서 뚜렷한 휘어진 모양이 발견되지 않았습니다 (${testText}).` });
   }
 
   // (2) 퍼짐 변화: X가 커질수록 잔차의 크기가 커지거나 작아지는지 (깔때기 모양 → 등분산 가정 위배 가능)
@@ -4874,6 +4889,18 @@ function runPolynomialRegressionAnalysis() {
       채택된 회귀 방정식 (${modelShortNames[chosen.order]}): ${equation}
     </td></tr>
   `;
+
+  // 5-1. 잔차 그래프 (채택된 모형 기준)
+  renderResidualCard({
+    xValues: xData,
+    yValues: yData,
+    residuals: chosen.residuals,
+    xLabel: var1,
+    numParams: chosen.numParams,
+    baseOrder: chosen.order,
+    modelLabel: modelShortNames[chosen.order],
+    curveHint: fittedMaxOrder < 3 ? "'비교할 최고 차수'를 3차로 바꿔 다시 분석해 보세요." : ""
+  });
 
   // 6. 시각화: 산점도 + 직선 + 곡선 동시 표시
   const chartCard = document.getElementById("infer-chart-card");
