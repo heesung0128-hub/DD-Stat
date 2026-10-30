@@ -22,7 +22,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   
   <!-- CSS Link -->
-  <link rel="stylesheet" href="style.css?v=20261030c">
+  <link rel="stylesheet" href="style.css?v=20261031a">
   
   <!-- External Libraries (CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/jstat@1.9.6/dist/jstat.min.js" crossorigin="anonymous"></script>
@@ -114,7 +114,7 @@
         <div class="header-actions">
           <button id="btn-export-report" class="btn btn-success hidden"><i class="fa-solid fa-file-export"></i> 분석 보고서 저장</button>
           <button id="btn-reset-data" class="btn btn-secondary"><i class="fa-solid fa-rotate-left"></i> 데이터 초기화</button>
-          <a href="https://github.com" target="_blank" class="help-link"><i class="fa-solid fa-circle-question"></i> 도움말</a>
+          <a href="#" id="btn-open-help" class="help-link"><i class="fa-solid fa-circle-question"></i> 도움말</a>
         </div>
       </header>
       
@@ -755,7 +755,7 @@
         <button class="btn-close" id="btn-close-outlier"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <div class="modal-body">
-        <p class="description">상자그림(Box Plot) 기준($Q1 - 1.5 \times IQR$ 미만이거나 $Q3 + 1.5 \times IQR$ 초과)으로 탐지된 이상치 목록입니다. 극단적이거나 오기입된 데이터인지 점검해 보세요.</p>
+        <p class="description">상자그림(Box Plot) 기준(Q1 − 1.5 × IQR 미만이거나 Q3 + 1.5 × IQR 초과)으로 탐지된 이상치 목록입니다. 극단적이거나 오기입된 데이터인지 점검해 보세요.</p>
         <div id="outlier-results-list" class="outlier-results-list mt-4">
           <!-- Javascript 렌더링 -->
         </div>
@@ -765,9 +765,41 @@
       </div>
     </div>
   </div>
-  
+
+  <!-- 도움말 모달: 사용 순서 및 결과 해석 시 유의점 -->
+  <div id="help-modal" class="modal-backdrop hidden">
+    <div class="modal modal-wide card glass">
+      <div class="modal-header">
+        <h3><i class="fa-solid fa-circle-question"></i> DD Stat 사용 안내</h3>
+        <button class="btn-close" id="btn-close-help"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body help-content">
+        <h4>사용 순서</h4>
+        <ol>
+          <li><strong>데이터 입력 및 관리</strong> — CSV·엑셀 파일을 올리거나 샘플 데이터를 불러옵니다. 각 열의 <strong>변수 유형(수치/범주)</strong>이 맞는지 확인하고, 필요하면 결측값을 처리합니다.</li>
+          <li><strong>기술통계 &amp; 시각화</strong> — 변수를 골라 평균·표준편차 등 요약 통계와 그래프를 확인합니다.</li>
+          <li><strong>추론통계 분석</strong> — 분석 방법과 변수를 고르고 <strong>연구 가설</strong>을 먼저 적은 뒤 실행합니다. 결과는 가정 점검 → 통계표 → 그래프 → 해석 순서로 나옵니다.</li>
+          <li><strong>확률분포 계산기</strong> — 정규분포·이항분포에서 원하는 범위의 확률을 계산합니다.</li>
+          <li><strong>분석 추천 도우미</strong> — 어떤 분석을 써야 할지 모를 때, 질문에 답하면 알맞은 분석을 추천합니다.</li>
+        </ol>
+        <p>분석이 끝나면 오른쪽 위의 <strong>[분석 보고서 저장]</strong>으로 결과를 파일로 저장할 수 있습니다.</p>
+
+        <h4>결과를 해석할 때 유의할 점</h4>
+        <ul>
+          <li><strong>p &lt; 0.05</strong>이면 "차이가 없다(관계가 없다)고 가정했을 때 이만큼 이상의 결과가 나올 확률이 5%보다 작다"는 뜻으로, 통계적으로 유의하다고 판단합니다.</li>
+          <li><strong>유의하지 않음</strong>은 "차이(관계)가 없다"가 아니라 "있다고 말할 근거가 부족하다"는 뜻입니다.</li>
+          <li><strong>상관·회귀 관계는 인과관계가 아닙니다.</strong> 두 변수가 함께 변해도 한쪽이 다른 쪽의 원인이라고 단정할 수 없습니다.</li>
+          <li>데이터가 적을수록 결과가 불안정합니다. 가정 점검에 나오는 <strong>표본 크기 주의</strong> 안내를 함께 확인하세요.</li>
+        </ul>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" id="btn-confirm-help">확인</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Script Link -->
-  <script src="stats-helper.js?v=20261030c"></script>
-  <script src="app.js?v=20261030c"></script>
+  <script src="stats-helper.js?v=20261031a"></script>
+  <script src="app.js?v=20261031a"></script>
 </body>
 </html>

@@ -24,6 +24,13 @@ function showGlobalErrorBanner(msg) {
 }
 
 // --- 추론통계 오차막대(Error Bar) 시각화 헬퍼 함수 (Canvas 기반) ---
+// 캔버스(Chart.js 포함)는 CSS 변수(var(--primary) 등)를 색상으로 해석하지 못하므로,
+// 현재 테마(라이트/다크)에 적용된 실제 색상값을 읽어 사용
+function themeColor(name) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || "#722ed1";
+}
+
 function drawErrorBarChart(canvasId, titleText, groupsInfo, testValueInfo = null) {
   const canvas = document.getElementById(canvasId);
   if (!canvas) return;
@@ -151,7 +158,7 @@ function drawErrorBarChart(canvasId, titleText, groupsInfo, testValueInfo = null
     ctx.font = "bold 9px sans-serif";
     ctx.textAlign = "left";
     ctx.fillText(`평균: ${g.mean.toFixed(2)}`, x + 8, yMean - 2);
-    ctx.fillStyle = "var(--text-muted)";
+    ctx.fillStyle = themeColor("--text-muted");
     ctx.font = "8px sans-serif";
     ctx.fillText(`[${g.lower.toFixed(2)} ~ ${g.upper.toFixed(2)}]`, x + 8, yMean + 8);
     
@@ -592,6 +599,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initProbCalculator();
   initWizard();
   initPaginationEvents();
+  initHelpModal();
 
   // 템플릿 다운로드 버튼 바인딩
   const downloadBtn = document.getElementById("btn-download-template");
@@ -648,6 +656,25 @@ function initTheme() {
     if (AppState.chartInstance) {
       triggerChartRefresh();
     }
+  });
+}
+
+// --- 도움말 모달 ---
+function initHelpModal() {
+  const modal = document.getElementById("help-modal");
+  const openBtn = document.getElementById("btn-open-help");
+  if (!modal || !openBtn) return;
+
+  const close = () => modal.classList.add("hidden");
+  openBtn.addEventListener("click", e => {
+    e.preventDefault();
+    modal.classList.remove("hidden");
+  });
+  document.getElementById("btn-close-help").addEventListener("click", close);
+  document.getElementById("btn-confirm-help").addEventListener("click", close);
+  // 바깥 영역을 누르면 닫기
+  modal.addEventListener("click", e => {
+    if (e.target === modal) close();
   });
 }
 
@@ -939,15 +966,34 @@ function initSampleData() {
     processRawData(rows, ["수면_시간(시간)", "학업_성적(점수)"]);
   });
 
-  // 2) 식습관 선호도 (Gender, Preferred_Food)
+  // 2) 식습관 선호도 (Gender, Preferred_Food) - 60명 가상 데이터
+  // 모든 셀의 기대빈도가 5 이상(최소 9.0)이 되도록 구성: χ²(2) ≈ 9.13, p ≈ 0.010, Cramér's V ≈ 0.39
   document.getElementById("btn-sample-diet").addEventListener("click", () => {
-    const genders = ["남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여", "남", "여"];
-    const foods = ["한식", "일식", "양식", "한식", "양식", "일식", "한식", "일식", "양식", "한식", "한식", "한식", "양식", "일식", "양식", "한식", "한식", "일식", "양식", "일식", "한식", "한식", "양식", "일식", "양식", "일식", "한식", "한식", "양식", "일식"];
-    
-    const rows = genders.map((g, idx) => ({
-      "성별": g,
-      "선호_음식": foods[idx]
-    }));
+    const counts = {
+      "남": { "한식": 16, "양식": 10, "일식": 4 },
+      "여": { "한식": 7, "양식": 9, "일식": 14 }
+    };
+    // 성별마다 음식 순서를 번갈아 섞고, 두 성별을 한 행씩 번갈아 배치 (정렬된 표처럼 보이지 않게)
+    const listFor = gender => {
+      const remaining = { ...counts[gender] };
+      const list = [];
+      while (Object.values(remaining).some(c => c > 0)) {
+        Object.keys(remaining).forEach(food => {
+          if (remaining[food] > 0) {
+            list.push(food);
+            remaining[food]--;
+          }
+        });
+      }
+      return list;
+    };
+    const male = listFor("남");
+    const female = listFor("여");
+    const rows = [];
+    for (let i = 0; i < Math.max(male.length, female.length); i++) {
+      if (i < male.length) rows.push({ "성별": "남", "선호_음식": male[i] });
+      if (i < female.length) rows.push({ "성별": "여", "선호_음식": female[i] });
+    }
     processRawData(rows, ["성별", "선호_음식"]);
   });
 
@@ -1435,7 +1481,7 @@ function initPreprocessTools() {
                   rowNum: idx + 1,
                   variable: h,
                   value: v,
-                  reason: v < desc.lowerBound ? `Q1 하한치(${desc.lowerBound.toFixed(2)}) 미만` : `Q3 상한치(${desc.upperBound.toFixed(2)}) 초과`
+                  reason: v < desc.lowerBound ? `하한 경계(Q1 − 1.5 × IQR = ${desc.lowerBound.toFixed(2)}) 미만` : `상한 경계(Q3 + 1.5 × IQR = ${desc.upperBound.toFixed(2)}) 초과`
                 });
               }
             });
@@ -1548,7 +1594,7 @@ function runDescriptiveAnalysis() {
       
       descTable.innerHTML = `
         <tr><th>기술 통계량</th><th>값</th><th>설명</th></tr>
-        <tr><td><strong>표본 크기 (N)</strong></td><td>${stats.n}</td><td>수집한 표본(학생)의 총 개수</td></tr>
+        <tr><td><strong>표본 크기 (N)</strong></td><td>${stats.n}</td><td>분석에 사용한 데이터의 총 개수</td></tr>
         <tr><td><strong>평균 (Mean)</strong></td><td>${stats.mean.toFixed(3)}</td><td>모든 데이터의 합을 개수로 나눈 값 (중심 경향)</td></tr>
         <tr><td><strong>중앙값 (Median)</strong></td><td>${stats.median.toFixed(3)}</td><td>데이터를 순서대로 세웠을 때 정중앙에 위치한 값</td></tr>
         <tr><td><strong>최빈값 (Mode)</strong></td><td>${stats.mode}</td><td>가장 자주 나타난 빈출 값</td></tr>
@@ -1568,9 +1614,9 @@ function runDescriptiveAnalysis() {
       let html = `<tr><th>범주 값</th><th>빈도 (Count)</th><th>비율 (Percentage)</th></tr>`;
       freqs.list.forEach(item => {
         const valLabel = getValLabel(var1, item.value);
-        html += `<tr><td><strong>${valLabel}</strong></td><td>${item.count}명</td><td>${item.percentage.toFixed(1)}%</td></tr>`;
+        html += `<tr><td><strong>${valLabel}</strong></td><td>${item.count}</td><td>${item.percentage.toFixed(1)}%</td></tr>`;
       });
-      html += `<tr class="highlight-row"><td><strong>합계</strong></td><td>${freqs.total}명</td><td>100.0%</td></tr>`;
+      html += `<tr class="highlight-row"><td><strong>합계</strong></td><td>${freqs.total}</td><td>100.0%</td></tr>`;
       descTable.innerHTML = html;
       
       if (chartType === "auto") chartType = "bar";
@@ -1622,7 +1668,7 @@ function runDescriptiveAnalysis() {
           html += `
             <tr>
               <td><strong>${valLabel}</strong></td>
-              <td>${desc.n}명</td>
+              <td>${desc.n}</td>
               <td>${desc.mean.toFixed(3)}</td>
               <td>${desc.stdDev.toFixed(3)}</td>
               <td>${se.toFixed(4)}</td>
@@ -1640,7 +1686,7 @@ function runDescriptiveAnalysis() {
         html += `
           <tr class="highlight-row">
             <td><strong>전체 합계</strong></td>
-            <td>${overall.n}명</td>
+            <td>${overall.n}</td>
             <td>${overall.mean.toFixed(3)}</td>
             <td>${overall.stdDev.toFixed(3)}</td>
             <td>${overallSe.toFixed(4)}</td>
@@ -1661,7 +1707,7 @@ function runDescriptiveAnalysis() {
 
       descTable.innerHTML = `
         <tr><th>기술 통계량</th><th>${var1} 변수값</th><th>${var2} 변수값</th></tr>
-        <tr><td><strong>표본 크기 (N)</strong></td><td>${stats1 ? stats1.n : 0}명</td><td>${stats2 ? stats2.n : 0}명</td></tr>
+        <tr><td><strong>표본 크기 (N)</strong></td><td>${stats1 ? stats1.n : 0}</td><td>${stats2 ? stats2.n : 0}</td></tr>
         <tr><td><strong>평균 (Mean)</strong></td><td>${stats1 ? stats1.mean.toFixed(3) : 0}</td><td>${stats2 ? stats2.mean.toFixed(3) : 0}</td></tr>
         <tr><td><strong>표준편차 (Std Dev)</strong></td><td>${stats1 ? stats1.stdDev.toFixed(3) : 0}</td><td>${stats2 ? stats2.stdDev.toFixed(3) : 0}</td></tr>
         <tr><td><strong>최소값 / 최대값</strong></td><td>${stats1 ? stats1.min + " / " + stats1.max : 0}</td><td>${stats2 ? stats2.min + " / " + stats2.max : 0}</td></tr>
@@ -1681,17 +1727,17 @@ function runDescriptiveAnalysis() {
       cross.rows.forEach(r => {
         html += `<tr><td><strong>${getValLabel(var1, r)}</strong></td>`;
         cross.cols.forEach(c => {
-          html += `<td>${cross.table[r][c]}명</td>`;
+          html += `<td>${cross.table[r][c]}</td>`;
         });
-        html += `<td><strong>${cross.rowTotals[r]}명</strong></td></tr>`;
+        html += `<td><strong>${cross.rowTotals[r]}</strong></td></tr>`;
       });
       
       // 하단 합계행
       html += `<tr class="highlight-row"><td><strong>합계</strong></td>`;
       cross.cols.forEach(c => {
-        html += `<td><strong>${cross.colTotals[c]}명</strong></td>`;
+        html += `<td><strong>${cross.colTotals[c]}</strong></td>`;
       });
-      html += `<td><strong>${cross.n}명</strong></td></tr>`;
+      html += `<td><strong>${cross.n}</strong></td></tr>`;
       descTable.innerHTML = html;
       
       if (chartType === "auto") chartType = "grouped-bar";
@@ -1780,7 +1826,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
             label: `${depVar} 평균`,
             data: groupMeans,
             backgroundColor: palette.slice(0, groupLabels.length),
-            borderColor: "var(--primary)",
+            borderColor: themeColor("--primary"),
             borderWidth: useChartType === "line" ? 2.5 : 0,
             fill: useChartType === "line" ? false : true,
             tension: 0.15
@@ -1860,7 +1906,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
             label: `${var1} 빈도`,
             data: bins,
             backgroundColor: primaryColor,
-            borderColor: "var(--primary)",
+            borderColor: themeColor("--primary"),
             borderWidth: 1,
             barPercentage: 1.0,
             categoryPercentage: 1.0,
@@ -2040,12 +2086,12 @@ function drawDescriptiveChart(var1, var2, chartType) {
         datasets: [{
           label: "도수 (빈도)",
           data: polygonData,
-          borderColor: "var(--primary)",
+          borderColor: themeColor("--primary"),
           backgroundColor: "rgba(114, 46, 209, 0.1)",
           fill: true,
           borderWidth: 2,
           pointRadius: 4,
-          pointBackgroundColor: "var(--primary)",
+          pointBackgroundColor: themeColor("--primary"),
           tension: 0.1
         }]
       },
@@ -2057,7 +2103,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
         },
         scales: {
           x: { title: { display: true, text: `계급 (${var1})`, color: textColor }, grid: { color: gridColor }, ticks: { color: textColor } },
-          y: { title: { display: true, text: "도수(명)", color: textColor }, grid: { color: gridColor }, ticks: { color: textColor, stepSize: 1 }, beginAtZero: true }
+          y: { title: { display: true, text: "도수", color: textColor }, grid: { color: gridColor }, ticks: { color: textColor, stepSize: 1 }, beginAtZero: true }
         }
       }
     });
@@ -2112,7 +2158,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
             stacked: chartType === "stacked-bar"
           },
           y: { 
-            title: { display: true, text: "빈도(명)", color: textColor },
+            title: { display: true, text: "빈도", color: textColor },
             grid: { color: gridColor }, 
             ticks: { color: textColor, stepSize: 1 }, 
             beginAtZero: true,
@@ -2133,13 +2179,13 @@ function drawDescriptiveChart(var1, var2, chartType) {
       data: {
         labels: labels,
         datasets: [{
-          label: "빈도(명)",
+          label: "빈도",
           data: values,
-          borderColor: "var(--primary)",
+          borderColor: themeColor("--primary"),
           backgroundColor: "rgba(114, 46, 209, 0.1)",
           borderWidth: 2,
           pointRadius: 4,
-          pointBackgroundColor: "var(--primary)",
+          pointBackgroundColor: themeColor("--primary"),
           tension: 0.1
         }]
       },
@@ -2167,7 +2213,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
       data: {
         labels: labels,
         datasets: [{
-          label: "빈도(명)",
+          label: "빈도",
           data: values,
           backgroundColor: palette.slice(0, labels.length),
           borderWidth: 0
@@ -2231,7 +2277,7 @@ function drawDescriptiveChart(var1, var2, chartType) {
           label: "관측치",
           data: points,
           backgroundColor: primaryColor,
-          borderColor: "var(--primary)",
+          borderColor: themeColor("--primary"),
           borderWidth: 1,
           pointRadius: 6,
           pointHoverRadius: 8
@@ -2341,16 +2387,24 @@ function renderDescInterpretation(var1, var2) {
     if (type1 === "continuous") {
       const stats = StatsHelper.calculateDescriptive(data1);
       box.innerHTML = `
-        <p>수집된 변수 <strong>'${var1}'</strong>의 분석 결과, 총 <strong>${stats.n}명</strong>의 데이터가 수집되었습니다.</p>
-        <p>전체 학생들의 평균값은 <strong>${stats.mean.toFixed(2)}</strong>이며, 가운데 위치한 중앙값은 <strong>${stats.median.toFixed(2)}</strong>입니다. 표준편차는 <strong>${stats.stdDev.toFixed(2)}</strong>로 나타나 측정값들이 평균 주위로 비교적 어떻게 퍼져있는지 보여줍니다.</p>
+        <p>변수 <strong>'${var1}'</strong>의 데이터는 총 <strong>${stats.n}개</strong>입니다.</p>
+        <p>평균은 <strong>${stats.mean.toFixed(2)}</strong>, 가운데 위치한 중앙값은 <strong>${stats.median.toFixed(2)}</strong>입니다. 표준편차는 <strong>${stats.stdDev.toFixed(2)}</strong>로, 측정값들이 평균을 중심으로 흩어진 정도를 나타냅니다.</p>
         <p>왜도는 <strong>${stats.skewness.toFixed(2)}</strong>로 ${Math.abs(stats.skewness) < 1.0 ? "비교적 대칭적인 분포를 보입니다." : "한쪽으로 다소 치우쳐 있습니다."} 첨도는 <strong>${stats.kurtosis.toFixed(2)}</strong>입니다.</p>
       `;
     } else {
+      // 실제 빈도로 문장 구성 (가장 많은/적은 항목은 동률이면 모두 표시)
       const freqs = StatsHelper.calculateFrequency(data1);
-      const top = freqs.list[0];
+      const maxCount = freqs.list[0].count;
+      const minCount = freqs.list[freqs.list.length - 1].count;
+      const describe = items => items.map(it => `'${getValLabel(var1, it.value)}'`).join(", ");
+      const topItems = freqs.list.filter(it => it.count === maxCount);
+      const bottomItems = freqs.list.filter(it => it.count === minCount);
+      const pct = count => (count / freqs.total * 100).toFixed(1);
       box.innerHTML = `
-        <p>범주형 변수 <strong>'${var1}'</strong>의 빈도를 분석한 결과, 가장 높은 비율을 차지한 항목은 <strong>'${getValLabel(var1, top.value)}'</strong>(으)로 총 <strong>${top.count}명 (${top.percentage.toFixed(1)}%)</strong>이 응답했습니다.</p>
-        <p>이어서 범주의 고른 분포 형태를 보이며, 총 <strong>${freqs.total}명</strong>의 응답이 정리되었습니다. 보고서의 기초 현황 테이블에 그대로 인용하실 수 있습니다.</p>
+        <p>범주형 변수 <strong>'${var1}'</strong>의 데이터는 총 <strong>${freqs.total}개</strong>이며, 범주는 <strong>${freqs.list.length}개</strong>입니다.</p>
+        ${maxCount === minCount
+          ? `<p>모든 범주의 빈도가 <strong>${maxCount}개 (${pct(maxCount)}%)</strong>로 같습니다.</p>`
+          : `<p>가장 많은 항목은 <strong>${describe(topItems)}</strong>(${maxCount}개, ${pct(maxCount)}%), 가장 적은 항목은 <strong>${describe(bottomItems)}</strong>(${minCount}개, ${pct(minCount)}%)입니다.</p>`}
       `;
     }
   } else {
@@ -2574,9 +2628,6 @@ function updateInferMethodOptions() {
           <select id="infer-select-group" class="form-control mt-1">${catOptionsHTML}</select>
           <p class="input-tip mt-1">예: 성별에 따른 성적 비교 시, 수치 변수는 '성적', 집단 변수는 '성별'</p>
         </div>
-        <div class="form-group mt-3">
-          <label><input type="checkbox" id="infer-chk-equalvar" checked> 등분산성 가정 적용</label>
-        </div>
       `;
       break;
       
@@ -2704,6 +2755,32 @@ function updateInferMethodOptions() {
 
   // 저장된 이전의 폼 값과 가설 복원
   restoreInferState();
+
+  // 두 변수를 고르는 분석은 두 번째 목록에서 첫 번째로 고른 변수를 빼서 같은 변수를 고를 수 없게 함
+  if (["paired-t", "chisq-ind", "correlation", "regression", "polyreg"].includes(method)) {
+    linkExclusiveSelects("infer-select-var1", "infer-select-var2");
+  }
+}
+
+// second 목록에서 first에 선택된 값을 제외 (first가 바뀔 때마다 다시 구성, 가능하면 기존 선택 유지)
+function linkExclusiveSelects(firstId, secondId) {
+  const first = document.getElementById(firstId);
+  const second = document.getElementById(secondId);
+  if (!first || !second) return;
+
+  const allOptions = Array.from(second.options).map(o => ({ value: o.value, text: o.text }));
+  const refresh = () => {
+    const previous = second.value;
+    second.innerHTML = "";
+    allOptions
+      .filter(o => o.value !== first.value)
+      .forEach(o => second.add(new Option(o.text, o.value)));
+    if (Array.from(second.options).some(o => o.value === previous)) {
+      second.value = previous;
+    }
+  };
+  first.addEventListener("change", refresh);
+  refresh();
 }
 
 // p값 해석 문장 (p값 = 귀무가설이 참이라고 가정할 때 관측된 것만큼 이상의 결과가 나타날 확률)
@@ -2729,6 +2806,13 @@ function runInferentialAnalysis() {
   }
 
   AppState.hypothesis = hypothesis;
+
+  // 두 번째 변수 목록이 비어 있는 경우 (선택 가능한 변수가 하나뿐일 때)
+  const secondSelect = document.getElementById("infer-select-var2");
+  if (secondSelect && method !== "multireg" && !secondSelect.value) {
+    alert("두 번째 변수로 선택할 수 있는 변수가 없습니다. 1단계에서 변수 유형(수치/범주)을 확인해 주세요.");
+    return;
+  }
 
   const resultsEmpty = document.getElementById("infer-results-empty");
   const resultsContent = document.getElementById("infer-results-content");
@@ -2828,7 +2912,7 @@ function runOneSampleTTestAnalysis() {
           <tbody>
             <tr>
               <td style="border:1px solid var(--border-glass); padding:8px;"><strong>${varName}</strong></td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${result.n}명</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${result.n}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${result.mean.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${result.stdDev.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${result.se.toFixed(4)}</td>
@@ -2934,7 +3018,7 @@ function runCIAnalysis() {
   const table = document.getElementById("infer-result-table");
   table.innerHTML = `
     <tr><th>통계 지표</th><th>결과값</th><th>설명</th></tr>
-    <tr><td><strong>표본 크기 (N)</strong></td><td>${ci.n}명</td><td>유효 데이터 총 개수</td></tr>
+    <tr><td><strong>표본 크기 (N)</strong></td><td>${ci.n}</td><td>유효 데이터 총 개수</td></tr>
     <tr><td><strong>표본 평균</strong></td><td>${ci.mean.toFixed(3)}</td><td>집단의 평균 측정치</td></tr>
     <tr><td><strong>표준편차 (S)</strong></td><td>${ci.stdDev.toFixed(3)}</td><td>흩어진 정도</td></tr>
     <tr><td><strong>표준오차 (SE)</strong></td><td>${ci.se.toFixed(4)}</td><td>표본평균이 모평균에서 얼마나 벗어나는지 추정오차</td></tr>
@@ -2947,7 +3031,7 @@ function runCIAnalysis() {
   // 4. 한국어 해석
   const interpretation = document.getElementById("infer-korean-interpretation");
   interpretation.innerHTML = `
-    <p>분석 대상 변수 <strong>'${varName}'</strong>의 모평균을 추정한 결과, 수집한 표본 ${ci.n}명을 기준으로 <strong>${level*100}% 신뢰구간은 [${ci.lower.toFixed(2)} ~ ${ci.upper.toFixed(2)}]</strong>입니다.</p>
+    <p>분석 대상 변수 <strong>'${varName}'</strong>의 모평균을 추정한 결과, 표본 ${ci.n}개를 바탕으로 <strong>${level*100}% 신뢰구간은 [${ci.lower.toFixed(2)} ~ ${ci.upper.toFixed(2)}]</strong>입니다.</p>
     <p>이는 만약 동일한 조사를 무한히 반복했을 때, 도출된 구간들 중 <strong>${level*100}%</strong>가 실제 모집단의 평균을 포함하고 있음을 뜻합니다.</p>
   `;
 
@@ -3077,14 +3161,14 @@ function runIndependentTTestAnalysis() {
           <tbody>
             <tr>
               <td style="border:1px solid var(--border-glass); padding:8px;"><strong>${getValLabel(groupVar, gA)}</strong></td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.groupAInfo.n}명</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.groupAInfo.n}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.groupAInfo.mean.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.groupAInfo.stdDev.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${(tResult.groupAInfo.stdDev / Math.sqrt(tResult.groupAInfo.n)).toFixed(4)}</td>
             </tr>
             <tr>
               <td style="border:1px solid var(--border-glass); padding:8px;"><strong>${getValLabel(groupVar, gB)}</strong></td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.groupBInfo.n}명</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.groupBInfo.n}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.groupBInfo.mean.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.groupBInfo.stdDev.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${(tResult.groupBInfo.stdDev / Math.sqrt(tResult.groupBInfo.n)).toFixed(4)}</td>
@@ -3259,14 +3343,14 @@ function runPairedTTestAnalysis() {
             <tr>
               <td style="border:1px solid var(--border-glass); padding:8px;">대응 1: <strong>${var1}</strong> (사전)</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${statsPre.mean.toFixed(3)}</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${statsPre.n}명</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${statsPre.n}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${statsPre.stdDev.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${(statsPre.stdDev / Math.sqrt(statsPre.n)).toFixed(4)}</td>
             </tr>
             <tr>
               <td style="border:1px solid var(--border-glass); padding:8px;">대응 2: <strong>${var2}</strong> (사후)</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${statsPost.mean.toFixed(3)}</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${statsPost.n}명</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${statsPost.n}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${statsPost.stdDev.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${(statsPost.stdDev / Math.sqrt(statsPost.n)).toFixed(4)}</td>
             </tr>
@@ -3291,9 +3375,9 @@ function runPairedTTestAnalysis() {
           <tbody>
             <tr>
               <td style="border:1px solid var(--border-glass); padding:8px;">대응 1: <strong>${var1}</strong> & <strong>${var2}</strong></td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.n}명</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px; font-weight:bold;">${tResult.correlation.r.toFixed(4)}</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px; color:${tResult.correlation.pValue < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${tResult.correlation.pValue.toFixed(4)}</strong></td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${tResult.n}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px; font-weight:bold;">${tResult.correlation.r === null ? "-" : tResult.correlation.r.toFixed(4)}</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px; color:${tResult.correlation.pValue !== null && tResult.correlation.pValue < 0.05 ? 'var(--primary)' : 'inherit'};"><strong>${tResult.correlation.pValue === null ? "-" : tResult.correlation.pValue.toFixed(4)}</strong>${tResult.correlation.r === null ? '<br><span style="font-size:9px;font-weight:normal;">(3쌍 이상부터 계산됩니다)</span>' : ''}</td>
             </tr>
           </tbody>
         </table>
@@ -3408,8 +3492,9 @@ function runAnovaAnalysis() {
     const rawData = groupDataMap[g.name];
     const desc = StatsHelper.calculateDescriptive(rawData);
     const se = desc.stdDev / Math.sqrt(desc.n);
-    const ciLower = desc.mean - 1.96 * se;
-    const ciUpper = desc.mean + 1.96 * se;
+    const tCritGroup = jStat.studentt.inv(0.975, desc.n - 1);
+    const ciLower = desc.mean - tCritGroup * se;
+    const ciUpper = desc.mean + tCritGroup * se;
     overallList = overallList.concat(rawData);
 
     descRowsHtml += `
@@ -3429,8 +3514,9 @@ function runAnovaAnalysis() {
   const overallDesc = StatsHelper.calculateDescriptive(overallList);
   if (overallDesc) {
     const overallSe = overallDesc.stdDev / Math.sqrt(overallDesc.n);
-    const overallCiLower = overallDesc.mean - 1.96 * overallSe;
-    const overallCiUpper = overallDesc.mean + 1.96 * overallSe;
+    const tCritOverall = jStat.studentt.inv(0.975, overallDesc.n - 1);
+    const overallCiLower = overallDesc.mean - tCritOverall * overallSe;
+    const overallCiUpper = overallDesc.mean + tCritOverall * overallSe;
     descRowsHtml += `
       <tr class="highlight-row">
         <td style="border:1px solid var(--border-glass); padding:8px;"><strong>전체 합계</strong></td>
@@ -3690,71 +3776,6 @@ function runAnovaAnalysis() {
   alertTxt.textContent = "주의: 분산분석(ANOVA)은 집단 간 평균의 차이를 식별하지만, 집단 구분이 독립적인 제3의 통제되지 않은 환경 요소들과 복합적으로 얽혀있을 수 있으므로 단정적인 인과 해석은 지양해야 합니다.";
 }
 
-// 5) 카이제곱 적합도 검정 실행
-function runChiSquareFitAnalysis() {
-  const varName = document.getElementById("infer-select-var").value;
-  const data = AppState.data.map(r => String(r[varName]).trim()).filter(v => !isMissingValue(varName, v));
-
-  const freq = StatsHelper.calculateFrequency(data);
-  const observed = freq.list.map(l => l.count);
-  const labels = freq.list.map(l => l.value);
-
-  // 1. 가정 점검
-  const lowCells = observed.filter(o => o < 5).length;
-  const lowCellPct = (lowCells / observed.length) * 100;
-  const passed = lowCellPct <= 20;
-  const cellCheck = {
-    passed,
-    reason: passed
-      ? `모든 범주의 관측치(N=${freq.total})가 충분하여 카이제곱 근사가 적절합니다.`
-      : `기대/관측 빈도가 5 미만인 범주 비율이 ${lowCellPct.toFixed(1)}%로 20%를 초과합니다. 신뢰도가 낮아질 수 있습니다.`,
-    severity: passed ? "success" : "warning"
-  };
-  renderAssumptionDashboard([cellCheck]);
-
-  // 2. 검정 연산
-  const chisq = StatsHelper.chiSquareTest(observed, null, "goodness");
-  if (chisq.error) {
-    alert(chisq.error);
-    return;
-  }
-
-  // 3. 결과 요약표
-  const table = document.getElementById("infer-result-table");
-  const sig = chisq.pValue < 0.05 ? "유의함 (p < 0.05)" : "유의하지 않음 (p ≥ 0.05)";
-
-  let rowsHtml = "";
-  labels.forEach((lbl, idx) => {
-    rowsHtml += `<tr><td>'${lbl}' 관측빈도 (기대빈도)</td><td>${observed[idx]}명 (${chisq.expected[idx].toFixed(1)}명)</td><td>오차 = ${(observed[idx] - chisq.expected[idx]).toFixed(1)}</td></tr>`;
-  });
-
-  table.innerHTML = `
-    <tr><th>통계 지표</th><th>결과값</th><th>설명</th></tr>
-    ${rowsHtml}
-    <tr><td><strong>카이제곱 통계량 (χ²)</strong></td><td>${chisq.chi2Value.toFixed(3)}</td><td>실제 관측치와 기대치 분포의 차이 지표</td></tr>
-    <tr><td><strong>자유도 (df)</strong></td><td>${chisq.df}</td><td>범주 수 - 1</td></tr>
-    <tr class="highlight-row"><td><strong>유의확률 (p-value)</strong></td><td><strong>${chisq.pValue.toFixed(4)}</strong> (${sig})</td><td>차이가 전혀 없는데 우연히 이런 왜곡 빈도가 관측될 확률</td></tr>
-  `;
-
-  // 4. 한국어 해석
-  const isSig = chisq.pValue < 0.05;
-  const interpretation = document.getElementById("infer-korean-interpretation");
-  
-  interpretation.innerHTML = `
-    <p>범주형 변수 <strong>'${varName}'</strong>의 각 범주 빈도가 균등한 기대를 따르는지 적합도 검정을 수행했습니다.</p>
-    <p>검정 결과, 범주별 편차 분포는 통계적으로 <strong>${isSig ? "유의미한 차이가 존재합니다" : "유의미한 차이가 나지 않습니다"}</strong> (χ² = ${chisq.chi2Value.toFixed(2)}, p = ${chisq.pValue.toFixed(3)}).</p>
-    <p>${isSig ? `즉, 각 범주가 균등한 비율로 선택되지 않고, 특정 항목으로 통계적으로 유의하게 치우친 편향 현상이 나타났음을 뜻합니다.` : `즉, 각 범주가 균등하게 고른 빈도로 분포되어 있어 고른 균등 기대를 충족하고 있습니다.`}</p>
-  `;
-
-  // 5. 경고판
-  const alertBox = document.getElementById("interpretation-limit-box");
-  const alertTxt = document.getElementById("interpretation-limit-text");
-  alertBox.style.backgroundColor = "var(--info-light)";
-  alertBox.style.color = "var(--info)";
-  alertBox.style.borderColor = "var(--info)";
-  alertTxt.textContent = "주의: 카이제곱 적합도 검정은 가설상의 확률(이론적 분포)과 수집 데이터 빈도를 비교하며, N이 너무 작으면 신뢰를 담보하기 어렵습니다.";
-}
-
 // 6) 카이제곱 독립성 검정 실행
 function runChiSquareIndAnalysis() {
   const var1 = document.getElementById("infer-select-var1").value;
@@ -3777,7 +3798,7 @@ function runChiSquareIndAnalysis() {
   });
 
   // 1. 검정 연산
-  const chisq = StatsHelper.chiSquareTest(matrix, null, "independence");
+  const chisq = StatsHelper.chiSquareTest(matrix);
   if (chisq.error) {
     alert(chisq.error);
     return;
@@ -3834,19 +3855,19 @@ function runChiSquareIndAnalysis() {
       const rowPct = roundedRowTotals[r] > 0 ? (obs / roundedRowTotals[r]) * 100 : 0;
       
       crossHtml += `<td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">
-        ${obs}명<br>
-        <span style="color:var(--text-muted); font-size:10px;">(기대: ${exp.toFixed(1)}명)</span><br>
+        ${obs}<br>
+        <span style="color:var(--text-muted); font-size:10px;">(기대: ${exp.toFixed(1)})</span><br>
         <span style="color:var(--info); font-size:10px; font-weight:600;">(행: ${rowPct.toFixed(1)}%)</span>
       </td>`;
     });
-    crossHtml += `<td style="border:1px solid var(--border-glass); text-align:center; padding:8px;"><strong>${roundedRowTotals[r]}명</strong></td></tr>`;
+    crossHtml += `<td style="border:1px solid var(--border-glass); text-align:center; padding:8px;"><strong>${roundedRowTotals[r]}</strong></td></tr>`;
   });
 
   crossHtml += `<tr class="highlight-row"><td style="border:1px solid var(--border-glass); padding:8px;"><strong>합계</strong></td>`;
   cross.cols.forEach(c => {
-    crossHtml += `<td style="border:1px solid var(--border-glass); text-align:center; padding:8px;"><strong>${roundedColTotals[c]}명</strong></td>`;
+    crossHtml += `<td style="border:1px solid var(--border-glass); text-align:center; padding:8px;"><strong>${roundedColTotals[c]}</strong></td>`;
   });
-  crossHtml += `<td style="border:1px solid var(--border-glass); text-align:center; padding:8px;"><strong>${roundedN}명</strong></td></tr>`;
+  crossHtml += `<td style="border:1px solid var(--border-glass); text-align:center; padding:8px;"><strong>${roundedN}</strong></td></tr>`;
   crossHtml += `</tbody></table></div></td></tr>`;
 
   table.innerHTML = `
@@ -3856,9 +3877,9 @@ function runChiSquareIndAnalysis() {
     <tr><td><strong>검정 방식</strong></td><td colspan="${cross.cols.length + 1}">피어슨 카이제곱 검정 (Pearson Chi-Square)</td></tr>
     <tr><td><strong>피어슨 카이제곱 통계량 (χ²)</strong></td><td colspan="${cross.cols.length + 1}"><strong>${chisq.chi2Value.toFixed(3)}</strong></td></tr>
     <tr><td><strong>자유도 (df)</strong></td><td colspan="${cross.cols.length + 1}">${chisq.df}</td></tr>
-    <tr class="highlight-row"><td><strong>유의확률 (p-value, 양측)</strong></td><td colspan="${cross.cols.length + 1}"><strong>${chisq.pValue.toFixed(4)}</strong> (${sig})</td></tr>
+    <tr class="highlight-row"><td><strong>유의확률 (p-value)</strong></td><td colspan="${cross.cols.length + 1}"><strong>${chisq.pValue.toFixed(4)}</strong> (${sig})</td></tr>
     <tr><td><strong>크라메르 V (Cramér's V) 효과크기</strong></td><td colspan="${cross.cols.length + 1}"><strong>${chisq.cramersV.toFixed(3)}</strong> (0.1: 약함, 0.3: 보통, 0.5: 강함)</td></tr>
-    <tr><td><strong>유효 케이스 수 (Valid N)</strong></td><td colspan="${cross.cols.length + 1}"><strong>${roundedN}명</strong></td></tr>
+    <tr><td><strong>유효 케이스 수 (Valid N)</strong></td><td colspan="${cross.cols.length + 1}"><strong>${roundedN}</strong></td></tr>
   `;
 
   // 3.5 차트 시각화 (그룹형 막대 그래프)
@@ -3906,7 +3927,7 @@ function runChiSquareIndAnalysis() {
       },
       scales: {
         x: { title: { display: true, text: var1, color: textColor }, grid: { display: false }, ticks: { color: textColor } },
-        y: { title: { display: true, text: "관측 빈도 (명)", color: textColor }, grid: { color: gridColor }, ticks: { color: textColor }, beginAtZero: true }
+        y: { title: { display: true, text: "관측 빈도", color: textColor }, grid: { color: gridColor }, ticks: { color: textColor }, beginAtZero: true }
       }
     }
   });
@@ -4009,13 +4030,13 @@ function runCorrelationAnalysis() {
               <td style="border:1px solid var(--border-glass); padding:8px;"><strong>${var1}</strong></td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats1.mean.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats1.stdDev.toFixed(3)}</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats1.n}명</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats1.n}</td>
             </tr>
             <tr>
               <td style="border:1px solid var(--border-glass); padding:8px;"><strong>${var2}</strong></td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats2.mean.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats2.stdDev.toFixed(3)}</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats2.n}명</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats2.n}</td>
             </tr>
           </tbody>
         </table>
@@ -4112,7 +4133,7 @@ function runCorrelationAnalysis() {
         label: "관측치",
         data: points,
         backgroundColor: "rgba(114, 46, 209, 0.7)",
-        borderColor: "var(--primary)",
+        borderColor: themeColor("--primary"),
         borderWidth: 1,
         pointRadius: 6,
         pointHoverRadius: 8
@@ -4439,13 +4460,13 @@ function runRegressionAnalysis() {
               <td style="border:1px solid var(--border-glass); padding:8px;">종속변수: <strong>${var2}</strong></td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats2.mean.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats2.stdDev.toFixed(3)}</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats2.n}명</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats2.n}</td>
             </tr>
             <tr>
               <td style="border:1px solid var(--border-glass); padding:8px;">독립변수: <strong>${var1}</strong></td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats1.mean.toFixed(3)}</td>
               <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats1.stdDev.toFixed(3)}</td>
-              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats1.n}명</td>
+              <td style="border:1px solid var(--border-glass); text-align:center; padding:8px;">${stats1.n}</td>
             </tr>
           </tbody>
         </table>
@@ -4588,7 +4609,7 @@ function runRegressionAnalysis() {
     ${coeffHtml}
     <tr><td colspan="4" style="padding-top:10px; border:none;"></td></tr>
     <tr><td colspan="4" style="font-size:12px; font-weight:bold; border:none; color:var(--primary);">
-      추정된 회귀 방정식: Y (${var2}) = ${reg.slope.toFixed(3)} * X (${var1}) + ${reg.intercept.toFixed(3)}
+      추정된 회귀 방정식: Y (${var2}) = ${reg.intercept.toFixed(3)} ${reg.slope < 0 ? "−" : "+"} ${Math.abs(reg.slope).toFixed(3)}·X  (X = ${var1})
     </td></tr>
   `;
 
@@ -4625,7 +4646,7 @@ function runRegressionAnalysis() {
           label: "관측치",
           data: points,
           backgroundColor: "rgba(114, 46, 209, 0.7)",
-          borderColor: "var(--primary)",
+          borderColor: themeColor("--primary"),
           borderWidth: 1,
           pointRadius: 5
         },
@@ -4633,7 +4654,7 @@ function runRegressionAnalysis() {
           label: "회귀 추정선",
           data: linePoints,
           type: "line",
-          borderColor: "var(--danger)",
+          borderColor: themeColor("--danger"),
           borderWidth: 2.5,
           fill: false,
           pointRadius: 0
@@ -5332,7 +5353,7 @@ function runMultipleRegressionAnalysis() {
           label: "관측 표본 (실제값 vs 예측값)",
           data: predPoints,
           backgroundColor: "rgba(114, 46, 209, 0.7)",
-          borderColor: "var(--primary)",
+          borderColor: themeColor("--primary"),
           borderWidth: 1,
           pointRadius: 5
         },
@@ -5396,9 +5417,9 @@ function runMultipleRegressionAnalysis() {
     <p>독립변수군(${varXList.map(x => `'${x}'`).join(", ")})이 종속변수 <strong>'${varY}'</strong>에 유의미한 예측 효과를 미치는지 다중선형회귀분석을 구동하였습니다.</p>
     <p>분석결과, 회귀 모형의 분산분석 유의성 검정 F값은 <strong>${reg.fValue.toFixed(3)}</strong>이며, 모델 유의확률 p값은 <strong>${reg.pValueF.toFixed(4)}</strong>로 나타나 통계적으로 <strong>${isModelSig ? "유의미하게 타당합니다" : "유의미하지 않습니다"}</strong>.</p>
     <p>모형의 전체 결정계수(R-Square)는 <strong>${reg.rSquared.toFixed(4)}</strong>로, 선택한 독립변수들이 종속변수 '${varY}' 전체 변동의 약 <strong>${(reg.rSquared*100).toFixed(1)}%</strong>를 설명합니다.</p>
-    ${isModelSig && sigVariables.length > 0 
-      ? `<p>회귀계수 유의성을 개별 검정한 결과, 독립변수들 중 <strong>${sigVarNames.join(", ")}</strong> 요인(들)이 5% 유의수준 하에서 통계적으로 유의한 예측 기여를 하는 것으로 실증되었습니다.</p>`
-      : `<p>개별 독립변수들의 회귀계수(B) 중 5% 유의수준에서 유의미한 독자적 설명력을 가지는 요인은 없는 것으로 나타났습니다.</p>`
+    ${sigVariables.length > 0
+      ? `<p>회귀계수를 개별 검정한 결과, 독립변수들 중 <strong>${sigVarNames.join(", ")}</strong>이(가) 5% 유의수준에서 통계적으로 유의한 예측 기여를 하는 것으로 나타났습니다.${!isModelSig ? ` <strong>다만 모형 전체는 유의하지 않으므로</strong> 개별 계수의 결과는 신중하게 해석해야 합니다.` : ""}</p>`
+      : `<p>회귀계수를 개별 검정한 결과, 5% 유의수준에서 유의한 예측 기여를 하는 독립변수는 없었습니다.</p>`
     }
     ${keyFactorText}
   `;
@@ -5502,6 +5523,15 @@ function runProbabilityCalculation() {
   const a = parseFloat(document.getElementById("input-prob-a").value);
   const b = parseFloat(document.getElementById("input-prob-b").value);
 
+  if (isNaN(a) || (range === "between" && isNaN(b))) {
+    alert("확률을 계산할 값 a" + (range === "between" ? ", b" : "") + "를 숫자로 입력해 주세요.");
+    return;
+  }
+  if (range === "between" && a > b) {
+    alert(`구간 a ≤ X ≤ b에서 a는 b보다 작거나 같아야 합니다. (현재 a = ${a}, b = ${b})`);
+    return;
+  }
+
   let pVal = 0;
   let formulaStr = "";
   let infoStr = "";
@@ -5591,7 +5621,7 @@ function runProbabilityCalculation() {
       else if (range === "greater" && k >= a) { isFilled = true; cumProb += prob; }
       else if (range === "between" && k >= a && k <= b) { isFilled = true; cumProb += prob; }
 
-      fillColors.push(isFilled ? "var(--primary)" : "rgba(114, 46, 209, 0.2)");
+      fillColors.push(isFilled ? themeColor("--primary") : "rgba(114, 46, 209, 0.2)");
     }
     pVal = cumProb;
 
@@ -5626,7 +5656,7 @@ function runProbabilityCalculation() {
         datasets: [{
           label: "확률밀도함수 (PDF)",
           data: plotData,
-          borderColor: "var(--primary)",
+          borderColor: themeColor("--primary"),
           borderWidth: 2,
           pointRadius: 0,
           fill: true,
@@ -5668,7 +5698,7 @@ function runProbabilityCalculation() {
         responsive: true,
         plugins: {
           legend: { display: false },
-          title: { display: true, text: `이항분포 도수분포 시각화`, color: textColor }
+          title: { display: true, text: `이항분포 확률 그래프 (확률질량함수)`, color: textColor }
         },
         scales: {
           x: { ticks: { color: textColor }, grid: { display: false } },

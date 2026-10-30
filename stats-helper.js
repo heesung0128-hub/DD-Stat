@@ -557,7 +557,8 @@ const StatsHelper = {
         };
       }
     } else if (actualN === 2) {
-      correlation = { r: 1.0, pValue: 1.0 };
+      // 점이 2개뿐이면 상관계수는 항상 ±1이 되고 유의성 검정(자유도 0)이 불가능하므로 계산하지 않음
+      correlation = { r: null, pValue: null };
     }
 
     return {
@@ -865,99 +866,60 @@ const StatsHelper = {
     };
   },
 
-  // 3.5 카이제곱 독립성/적합도 검정 (Chi-Square Test)
-  chiSquareTest(observed, expected = null, type = "independence") {
-    // type: "goodness" (적합도) 또는 "independence" (독립성)
-    if (type === "goodness") {
-      const n = observed.length;
-      if (n < 2) return { error: "적합도 검정을 위해 최소 2개 이상의 범주가 필요합니다." };
-      
-      const totalObs = observed.reduce((a, b) => a + b, 0);
-      let expValues = [];
-      if (!expected) {
-        // 기본값: 균등 분포
-        expValues = Array(n).fill(totalObs / n);
-      } else {
-        const totalExpProb = expected.reduce((a, b) => a + b, 0);
-        expValues = expected.map(p => (p / totalExpProb) * totalObs);
+  // 3.5 카이제곱 독립성 검정 (Chi-Square Test of Independence)
+  chiSquareTest(observed) {
+    // observed: 2차원 빈도 배열 [[n11, n12], [n21, n22]]
+    const r = observed.length;
+    const c = observed[0].length;
+    if (r < 2 || c < 2) return { error: "독립성 검정을 위해 최소 2x2 교차표가 필요합니다." };
+
+    const rowTotals = Array(r).fill(0);
+    const colTotals = Array(c).fill(0);
+    let grandTotal = 0;
+
+    for (let i = 0; i < r; i++) {
+      for (let j = 0; j < c; j++) {
+        rowTotals[i] += observed[i][j];
+        colTotals[j] += observed[i][j];
+        grandTotal += observed[i][j];
       }
-
-      let chi2 = 0;
-      let lowExpectedCells = 0;
-      for (let i = 0; i < n; i++) {
-        if (expValues[i] < 5) lowExpectedCells++;
-        chi2 += Math.pow(observed[i] - expValues[i], 2) / expValues[i];
-      }
-
-      const df = n - 1;
-      const pVal = 1 - jStat.chisquare.cdf(chi2, df);
-      const lowCellPercent = (lowExpectedCells / n) * 100;
-
-      return {
-        method: "카이제곱 적합도 검정",
-        chi2Value: chi2,
-        df,
-        pValue: pVal,
-        observed,
-        expected: expValues,
-        warning: lowCellPercent > 20 ? "기대빈도가 5 미만인 범주가 20%를 초과하여 결과의 신뢰도가 떨어질 수 있습니다." : null
-      };
-
-    } else {
-      // 독립성 검정
-      // observed: 2차원 빈도 배열 [[n11, n12], [n21, n22]]
-      const r = observed.length;
-      const c = observed[0].length;
-      if (r < 2 || c < 2) return { error: "독립성 검정을 위해 최소 2x2 교차표가 필요합니다." };
-
-      const rowTotals = Array(r).fill(0);
-      const colTotals = Array(c).fill(0);
-      let grandTotal = 0;
-
-      for (let i = 0; i < r; i++) {
-        for (let j = 0; j < c; j++) {
-          rowTotals[i] += observed[i][j];
-          colTotals[j] += observed[i][j];
-          grandTotal += observed[i][j];
-        }
-      }
-
-      let chi2 = 0;
-      let lowExpectedCells = 0;
-      const expectedMatrix = [];
-
-      for (let i = 0; i < r; i++) {
-        expectedMatrix[i] = [];
-        for (let j = 0; j < c; j++) {
-          const exp = (rowTotals[i] * colTotals[j]) / grandTotal;
-          expectedMatrix[i][j] = exp;
-          if (exp < 5) lowExpectedCells++;
-          
-          if (exp > 0) {
-            chi2 += Math.pow(observed[i][j] - exp, 2) / exp;
-          }
-        }
-      }
-
-      const df = (r - 1) * (c - 1);
-      const pVal = 1 - jStat.chisquare.cdf(chi2, df);
-      const lowCellPercent = (lowExpectedCells / (r * c)) * 100;
-
-      // 효과크기 Cramér's V
-      const kMin = Math.min(r - 1, c - 1);
-      const cramersV = grandTotal > 0 && kMin > 0 ? Math.sqrt(chi2 / (grandTotal * kMin)) : 0;
-
-      return {
-        method: "카이제곱 독립성 검정",
-        chi2Value: chi2,
-        df,
-        pValue: pVal,
-        cramersV,
-        observed,
-        expected: expectedMatrix,
-        warning: lowCellPercent > 20 ? `기대빈도가 5 미만인 셀이 ${lowCellPercent.toFixed(1)}%로 전체의 20%를 초과합니다. 표본이 다소 부족할 수 있습니다.` : null
-      };
     }
+
+    let chi2 = 0;
+    let lowExpectedCells = 0;
+    const expectedMatrix = [];
+
+    for (let i = 0; i < r; i++) {
+      expectedMatrix[i] = [];
+      for (let j = 0; j < c; j++) {
+        const exp = (rowTotals[i] * colTotals[j]) / grandTotal;
+        expectedMatrix[i][j] = exp;
+        if (exp < 5) lowExpectedCells++;
+        
+        if (exp > 0) {
+          chi2 += Math.pow(observed[i][j] - exp, 2) / exp;
+        }
+      }
+    }
+
+    const df = (r - 1) * (c - 1);
+    const pVal = 1 - jStat.chisquare.cdf(chi2, df);
+    const lowCellPercent = (lowExpectedCells / (r * c)) * 100;
+
+    // 효과크기 Cramér's V
+    const kMin = Math.min(r - 1, c - 1);
+    const cramersV = grandTotal > 0 && kMin > 0 ? Math.sqrt(chi2 / (grandTotal * kMin)) : 0;
+
+    return {
+      method: "카이제곱 독립성 검정",
+      chi2Value: chi2,
+      df,
+      pValue: pVal,
+      cramersV,
+      observed,
+      expected: expectedMatrix,
+      warning: lowCellPercent > 20 ? `기대빈도가 5 미만인 셀이 ${lowCellPercent.toFixed(1)}%로 전체의 20%를 초과합니다. 표본이 다소 부족할 수 있습니다.` : null
+    };
   },
 
   // 3.6 상관분석 (Pearson Correlation)
